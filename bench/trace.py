@@ -76,7 +76,24 @@ def extract_events(text: str) -> list:
 
 
 def _extract_tokens(text: str):
-    seen = {}
+    """Collect usage dicts at any depth; return the LAST seen (final usage).
+
+    Handles both flat (`{"type":"usage","prompt_tokens":N,...}`) and nested
+    (`{"usage": {"prompt_tokens": N, ...}}`) JSON shapes.
+    """
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if "prompt_tokens" in node and isinstance(node.get("prompt_tokens"), int):
+                found.append({"in": node["prompt_tokens"],
+                              "out": node.get("completion_tokens")})
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
     for line in text.splitlines():
         if "prompt_tokens" not in line:
             continue
@@ -84,10 +101,8 @@ def _extract_tokens(text: str):
             obj = json.loads(line)
         except Exception:  # noqa: BLE001
             continue
-        for v in obj.values():
-            if isinstance(v, dict) and "prompt_tokens" in v:
-                seen = {"in": v["prompt_tokens"], "out": v.get("completion_tokens")}
-    return seen or None
+        walk(obj)
+    return found[-1] if found else None
 
 
 def _regex_fallback(text: str):

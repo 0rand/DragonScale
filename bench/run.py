@@ -74,7 +74,7 @@ def main():
     (runs / "report.md").write_text(render_markdown(report))
 
     print(json.dumps(report["verdict"], indent=2))
-    print(f"report: {runs / 'report.md'}")
+    print(f"report: {runs / 'report.md'}", file=sys.stderr)
 
 
 if __name__ == "__main__":
