@@ -3,3 +3,5 @@ runs/
 __pycache__/
 *.pyc
 .DS_Store
+scripts/smoke_good/
+scripts/smoke_broken/
