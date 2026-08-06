@@ -113,6 +113,7 @@ def _regex_fallback(text: str):
 
 
 def summarize(text: str) -> dict:
+    tokens = _extract_tokens(text)
     events = extract_events(text)
     if events:
         calls = Counter()
@@ -126,12 +127,12 @@ def summarize(text: str) -> dict:
             "total_calls": len(events),
             "calls_by_tool": dict(calls),
             "failures_by_tool": dict(fails),
-            "tokens": _extract_tokens(text),
+            "tokens": tokens,
         }
     return {
         "parser": "regex",
         "total_calls": None,
         "calls_by_tool": _regex_fallback(text),
         "failures_by_tool": {},
-        "tokens": None,
+        "tokens": tokens,
     }
