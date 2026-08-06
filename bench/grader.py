@@ -6,12 +6,15 @@ Everything else (visible tests, model's own tests, trace) is diagnostic.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
+import termios
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -136,11 +139,17 @@ def _human_play_smoke(sandbox: Path) -> dict:
       1. launch, render must appear (screen output works)
       2. send 'w' (flap) — the key loop must consume it and stay alive
       3. send 'q' — clean quit, exit 0
-    Proves: curses/keyboard init, a live key loop, and a working quit path.
+    Plus a SMALL-TERMINAL (10 rows) pass whose raw output is scanned for
+    frame overflow (frames taller than the terminal scroll and stack —
+    the "3 parallel realities" bug). Curses games adapt; hardcoded-frame
+    games overflow. Proves: curses/keyboard init, a live key loop, a
+    working quit path, and that the screen fits the terminal.
     """
     import pty
     import select
     import time
+
+    from bench import ansi_model
 
     start = time.monotonic()
     master, slave = pty.openpty()
@@ -158,12 +167,14 @@ def _human_play_smoke(sandbox: Path) -> dict:
     sent_w = sent_q = False
     alive_after_flap = False
     drained = 0
+    raw = b""
     while time.monotonic() - start < 15:
         r, _, _ = select.select([master], [], [], 0.1)
         if r:
             try:
                 chunk = os.read(master, 65536)
                 drained += len(chunk)
+                raw += chunk
             except OSError:
                 break
         t = time.monotonic() - start
@@ -188,10 +199,38 @@ def _human_play_smoke(sandbox: Path) -> dict:
         proc.wait()
     rc = proc.poll()
     os.close(master)
+
+    # Small-terminal overflow check: 10 rows, short run.
+    overflow = 0
+    try:
+        master2, slave2 = pty.openpty()
+        fcntl.ioctl(slave2, termios.TIOCSWINSZ, struct.pack("HHHH", 10, 80, 0, 0))
+        proc2 = subprocess.Popen(
+            [str(VENV_PY), "-m", "game"],
+            cwd=str(sandbox), stdin=slave2, stdout=slave2, stderr=slave2,
+            env={**os.environ, "TERM": "xterm-256color"}, close_fds=True)
+        os.close(slave2)
+        out2 = b""
+        end2 = time.monotonic() + 2.0
+        while time.monotonic() < end2:
+            r2, _, _ = select.select([master2], [], [], 0.1)
+            if r2:
+                try:
+                    out2 += os.read(master2, 65536)
+                except OSError:
+                    break
+            time.sleep(0.02)
+        proc2.kill()
+        os.close(master2)
+        overflow = ansi_model.count_overflow_writes(out2, rows=10)
+    except Exception as e:  # noqa: BLE001
+        overflow = -1  # check unavailable
+
     elapsed = int((time.monotonic() - start) * 1000)
-    return {"ok": rc == 0 and alive_after_flap and sent_q,
+    return {"ok": rc == 0 and alive_after_flap and sent_q and overflow == 0,
             "exit": rc, "sent_w": sent_w, "alive_after_flap": alive_after_flap,
-            "sent_q": sent_q, "drained_bytes": drained, "ms": elapsed}
+            "sent_q": sent_q, "drained_bytes": drained, "ms": elapsed,
+            "overflow_writes": overflow, "small_terminal_ok": overflow == 0}
 
 
 def compute_score(report: dict) -> dict:
@@ -358,6 +397,8 @@ def render_markdown(report: dict) -> str:
               f"- flap key ('w'): sent={hp.get('sent_w')}, alive after flap="
               f"{hp.get('alive_after_flap')}",
               f"- quit key ('q'): sent={hp.get('sent_q')}",
+              f"- small-terminal overflow: {hp.get('overflow_writes')} writes "
+              f"(ok={hp.get('small_terminal_ok')})",
               ""]
 
     mut = report.get("mutation", {})
