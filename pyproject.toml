@@ -1,0 +1,11 @@
+[project]
+name = "dragonscale"
+version = "0.1.0"
+description = "Sovereign coding-model benchmark: one prompt, one target dir, deterministic gates, no-LLM score."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["bench/tests"]
+# NOTE: no `-q` in addopts — the grader passes `-q` explicitly to subprocess
+# pytest runs; double `-q` becomes `-qq` which suppresses the "N passed"
+# summary line, so the grader's regex parses 0 passed and every gate fails.
