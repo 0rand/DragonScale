@@ -43,9 +43,13 @@ def main():
     sandbox = runs / "sandbox"
 
     if args.prebuilt:
+        src = (ROOT / args.prebuilt).resolve()
+        if src == sandbox.resolve():
+            sys.exit(f"refusing: --prebuilt {args.prebuilt} is the run dir itself "
+                     f"(--label {args.label}) — would delete the evidence")
         if sandbox.exists():
             shutil.rmtree(sandbox)
-        shutil.copytree(ROOT / args.prebuilt, sandbox)
+        shutil.copytree(src, sandbox)
     else:
         if sandbox.exists():
             shutil.rmtree(sandbox)

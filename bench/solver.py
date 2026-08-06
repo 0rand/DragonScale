@@ -10,13 +10,13 @@ prove that a level is actually completable:
   2. Growing horizon — the gap-aiming probe may die on brutal levels. When
      it does, BFS the known timeline, replay the surviving path, and keep
      probing past the previous death point. Each iteration extends the
-     timeline; converges when the timeline reaches LEVEL_COMPLETE or BFS
+     timeline; converges when the timeline reaches a completion status (LEVEL_COMPLETE|WON) or BFS
      can no longer survive it.
   3. BFS — exact (y, velocity) state-space search through the timeline
      using the documented integration model and the model's OWN constants.
      Parent-pointer paths, quantized dedupe (no list copying).
   4. Replay — run the final path through a FRESH controller and require
-     LEVEL_COMPLETE. A replay mismatch means the model's physics deviates
+     COMPLETE (LEVEL_COMPLETE|WON). A replay mismatch means the model's physics deviates
      from the documented tick order or is nondeterministic.
 """
 
@@ -26,6 +26,14 @@ BAND = 13.5  # hover target when no pipe is approaching
 MAX_TICKS = 3000
 MAX_HORIZON_ITERATIONS = 14
 
+
+
+COMPLETE_STATUSES = ("LEVEL_COMPLETE", "WON")
+
+
+def _is_complete(status: str) -> bool:
+    """Terminal success statuses per the GameController contract."""
+    return status in COMPLETE_STATUSES
 
 def _record_event(module, st2):
     window = None
@@ -54,7 +62,7 @@ def _probe_from(module, ctl, band, max_ticks, events):
             break
         st2 = ctl.step(_choose_action(module, st, band))
         events.append(_record_event(module, st2))
-        if st2["status"] == "LEVEL_COMPLETE":
+        if _is_complete(st2["status"]):
             break
     return events
 
@@ -63,7 +71,7 @@ def _bfs(module, level_idx, events, y0, vel0, height):
     """Return (survives_all, completed, path|None).
 
     - survives_all: some trajectory survives every event in the timeline.
-    - completed: that trajectory reaches a LEVEL_COMPLETE event.
+    - completed: that trajectory reaches a completion status (LEVEL_COMPLETE|WON) event.
     - path: the action sequence (length == len(events) when survives_all).
 
     Flappy is a TIME-INDEXED system: the same (y, vel) at different ticks
@@ -110,7 +118,7 @@ def _bfs(module, level_idx, events, y0, vel0, height):
         parent_layers.append(nxt_parents)
         if not frontier:
             return False, False, None
-        if ev["status"] == "LEVEL_COMPLETE":
+        if _is_complete(ev["status"]):
             # the bird survives the tick that completes the level
             k = next(iter(frontier))
             path = []
@@ -144,7 +152,7 @@ def solve_level(module, factory, level_idx, seed):
     _probe_from(module, ctl, BAND, MAX_TICKS, events)
 
     for _iter in range(MAX_HORIZON_ITERATIONS):
-        if events and events[-1]["status"] == "LEVEL_COMPLETE":
+        if events and _is_complete(events[-1]["status"]):
             break
         prev_len = len(events)
         survives, completed, path = _bfs(module, level_idx, events,
@@ -198,7 +206,7 @@ def solve_level(module, factory, level_idx, seed):
     result["path_len"] = len(path)
     result["final_status"] = final["status"] if final else None
     result["final_score"] = final["score"] if final else 0
-    result["replay_ok"] = bool(final and final["status"] == "LEVEL_COMPLETE")
+    result["replay_ok"] = bool(final and _is_complete(final["status"]))
     return result
 
 
