@@ -3,6 +3,10 @@ name = "dragonscale"
 version = "0.1.0"
 description = "Sovereign coding-model benchmark: one prompt, one target dir, deterministic gates, no-LLM score."
 requires-python = ">=3.11"
+# Runtime: stdlib only, zero dependencies.
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]
 testpaths = ["bench/tests"]

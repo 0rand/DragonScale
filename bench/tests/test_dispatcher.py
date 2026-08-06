@@ -30,3 +30,33 @@ def test_opencode_cmd_shape():
 
 def test_jcode_fallback_has_no_selfdev():
     assert "--no-selfdev" in inspect.getsource(dispatch_jcode)
+
+
+def test_find_binary_env_override(monkeypatch, tmp_path):
+    fake = tmp_path / "opencode"
+    fake.write_text("#!/bin/sh\necho fake\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("OPENCODE_BIN", str(fake))
+    assert dispatcher._find_binary("opencode", "OPENCODE_BIN") == str(fake)
+
+
+def test_find_binary_path_lookup(monkeypatch, tmp_path):
+    fake = tmp_path / "jcode"
+    fake.write_text("#!/bin/sh\necho fake\n")
+    fake.chmod(0o755)
+    monkeypatch.delenv("JCODE_BIN", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert dispatcher._find_binary("jcode", "JCODE_BIN") == str(fake)
+
+
+def test_find_binary_missing_raises_clear_error(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENCODE_BIN", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))  # empty dir: nothing on PATH
+    try:
+        dispatcher._find_binary("opencode", "OPENCODE_BIN")
+        assert False, "expected RuntimeError"
+    except RuntimeError as e:
+        msg = str(e)
+        assert "not found" in msg
+        assert "does not install" in msg or "does not install" in msg.lower()
+        assert "OPENCODE_BIN" in msg

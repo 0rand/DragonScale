@@ -5,8 +5,16 @@ Usage:
   python3 bench/run.py --scenario flappy-build --label smoke-good \
       --prebuilt scripts/smoke_good
 
-  # full run: dispatch to jcode/omlx-35b, then grade
-  python3 bench/run.py --scenario flappy-build --label run-35b-001 \
+  # full run: dispatch opencode -> model, then grade
+  python3 bench/run.py --scenario flappy-build --label run-oc-001 \
+      --runner opencode --provider UNOBTANIUM --model Qwen3.6-35B-... --timeout 3600
+
+  # opencode model as one string (Provider/Model), custom workdir
+  python3 bench/run.py --scenario flappy-build --label run-ds-001 \
+      --runner opencode --model MEDIABRIDGE/main --workdir /tmp/ds-sandbox --timeout 3600
+
+  # jcode fallback
+  python3 bench/run.py --scenario flappy-build --label run-jc-001 \
       --runner jcode --provider omlx-35b --timeout 3600
 """
 
@@ -27,9 +35,14 @@ def main():
     ap.add_argument("--scenario", required=True)
     ap.add_argument("--label", required=True)
     ap.add_argument("--prebuilt", help="grade an existing directory instead of dispatching")
-    ap.add_argument("--runner", choices=["jcode", "opencode"], default="jcode")
-    ap.add_argument("--provider", default="omlx-35b", help="jcode provider profile")
-    ap.add_argument("--model", help="opencode model (provider/model)")
+    ap.add_argument("--runner", choices=["jcode", "opencode"], default="opencode")
+    ap.add_argument("--provider", default=None,
+                    help="jcode provider profile, or opencode provider name "
+                         "(combined with --model into Provider/Model)")
+    ap.add_argument("--model", help="opencode model name (with --provider, "
+                                    "or full 'Provider/Model' string)")
+    ap.add_argument("--workdir", help="directory to create for the sandbox "
+                                      "(default: runs/<label>/sandbox)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--timeout", type=int, default=3600)
     args = ap.parse_args()
@@ -40,7 +53,8 @@ def main():
 
     runs = ROOT / "runs" / args.label
     runs.mkdir(parents=True, exist_ok=True)
-    sandbox = runs / "sandbox"
+    sandbox = Path(args.workdir).expanduser().resolve() if args.workdir \
+        else runs / "sandbox"
 
     if args.prebuilt:
         src = (ROOT / args.prebuilt).resolve()
@@ -60,12 +74,17 @@ def main():
             res = dispatch_jcode(sandbox, scenario / "prompt.md", args.provider,
                                  timeout=args.timeout)
         else:
-            if not args.model:
-                sys.exit("--model required for opencode runner")
-            res = dispatch_opencode(sandbox, scenario / "prompt.md", args.model,
+            model = args.model
+            if not model:
+                sys.exit("--model required for opencode runner "
+                         "(--provider NAME --model NAME, or --model Provider/Model)")
+            if "/" not in model and args.provider:
+                model = f"{args.provider}/{model}"
+            res = dispatch_opencode(sandbox, scenario / "prompt.md", model,
                                     timeout=args.timeout)
         (runs / "dispatch.json").write_text(json.dumps(
-            {"runner": args.runner, "exit": res["exit"],
+            {"runner": args.runner, "provider": args.provider, "model": args.model,
+             "workdir": str(sandbox), "exit": res["exit"],
              "stdout_bytes": len(res["stdout"]), "stderr_bytes": len(res["stderr"])},
             indent=2))
         (runs / "dispatch.stdout.log").write_text(res["stdout"])

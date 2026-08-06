@@ -3,6 +3,11 @@
 opencode is the PRIMARY runner (Primo's preference — proven, distributed,
 clean one-shot sessions). jcode is retained as a fallback.
 
+Runners are NOT installed by the bench — they must be installed and
+configured by the operator (see README). Binaries resolve via env override
+(OPENCODE_BIN / JCODE_BIN) then PATH; a clear error names the missing tool
+and how to install it.
+
 Both runners get a SANITIZED environment: all HERMES_* vars are stripped so
 the bench model never inherits the parent agent session's persona/context
 (learned the hard way: jcode ambient mode leaked the full Hermes persona +
@@ -20,9 +25,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-JCODE = "/Users/xraan/.local/bin/jcode"
-OPENCODE = "/opt/homebrew/bin/opencode"
-
 # Env vars that carry the parent Hermes session's identity/context.
 # Strip them so the bench model runs clean-room.
 HERMES_ENV_PREFIXES = ("HERMES_",)
@@ -30,6 +32,29 @@ HERMES_ENV_PREFIXES = ("HERMES_",)
 DROP_ENV = {
     "JCODE_AMBIENT", "JCODE_AMBIENT_MODE", "OPENCODE_AMBIENT",
 }
+
+
+def _find_binary(name: str, env_var: str) -> str:
+    """Resolve a runner binary: env override -> PATH -> clear error.
+
+    The bench does not install runners. If the operator hasn't installed
+    the tool, say so plainly with the install hint instead of letting
+    subprocess raise a bare FileNotFoundError.
+    """
+    override = os.environ.get(env_var)
+    if override and Path(override).exists():
+        return override
+    found = shutil.which(name)
+    if found:
+        return found
+    hint = {
+        "opencode": "install + configure opencode first (see README): "
+                    "`npm i -g opencode-ai` or https://opencode.ai/docs",
+        "jcode": "install jcode first (see README): https://github.com/jcode-ai/jcode",
+    }.get(name, "install it")
+    raise RuntimeError(
+        f"{name} not found on PATH (override with {env_var}). {hint}. "
+        f"The bench does not install or configure runners.")
 
 
 def clean_env() -> dict:
@@ -71,7 +96,8 @@ def dispatch_opencode(sandbox: Path, prompt_path: Path, model: str,
     has full read/edit/bash permissions in the user config.
     """
     msg = _prepare_task(sandbox, prompt_path)
-    cmd = [OPENCODE, "run", "--format", "json", "-m", model,
+    cmd = [_find_binary("opencode", "OPENCODE_BIN"),
+           "run", "--format", "json", "-m", model,
            "--agent", "build", "--dir", str(sandbox), msg]
     return _run(cmd, sandbox, timeout)
 
@@ -83,6 +109,7 @@ def dispatch_jcode(sandbox: Path, prompt_path: Path, provider: str,
     --no-selfdev + clean env disable jcode's parent-session inheritance.
     """
     prompt = prompt_path.read_text()
-    cmd = [JCODE, "--provider-profile", provider, "run", "--json", "--quiet",
+    cmd = [_find_binary("jcode", "JCODE_BIN"),
+           "--provider-profile", provider, "run", "--json", "--quiet",
            "--trace", "--no-selfdev", "-C", str(sandbox), prompt]
     return _run(cmd, sandbox, timeout)

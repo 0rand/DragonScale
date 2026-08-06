@@ -128,10 +128,15 @@ def _mutation_sensitivity(sandbox: Path, model_tests_path: Path) -> dict:
 
 
 def _human_play_smoke(sandbox: Path) -> dict:
-    """Launch `python3 -m game` in a PTY, drain output, send 'q', expect exit 0.
+    """Launch `python3 -m game` in a PTY, prove keyboard input + screen, quit.
 
-    Proves the game a human would actually run: curses/keyboard init, the
-    key loop alive (it must render and read input), and a clean quit path.
+    Sequence (with continuous output drain — a pty buffer fills and blocks
+    the child's write if we don't read, so the child never reaches its input
+    read; a real human terminal consumes output continuously):
+      1. launch, render must appear (screen output works)
+      2. send 'w' (flap) — the key loop must consume it and stay alive
+      3. send 'q' — clean quit, exit 0
+    Proves: curses/keyboard init, a live key loop, and a working quit path.
     """
     import pty
     import select
@@ -150,9 +155,9 @@ def _human_play_smoke(sandbox: Path) -> dict:
         return {"ok": False, "error": f"spawn failed: {e}", "ms": int((time.monotonic() - start) * 1000)}
     os.close(slave)
 
-    sent_q = False
+    sent_w = sent_q = False
+    alive_after_flap = False
     drained = 0
-    elapsed = int((time.monotonic() - start) * 1000)
     while time.monotonic() - start < 15:
         r, _, _ = select.select([master], [], [], 0.1)
         if r:
@@ -161,7 +166,15 @@ def _human_play_smoke(sandbox: Path) -> dict:
                 drained += len(chunk)
             except OSError:
                 break
-        if time.monotonic() - start > 1.5 and not sent_q:
+        t = time.monotonic() - start
+        if t > 1.5 and not sent_w:
+            try:
+                os.write(master, b"w")
+                sent_w = True
+            except OSError:
+                pass
+        if t > 3.0 and sent_w and not sent_q:
+            alive_after_flap = proc.poll() is None
             try:
                 os.write(master, b"q")
                 sent_q = True
@@ -176,8 +189,9 @@ def _human_play_smoke(sandbox: Path) -> dict:
     rc = proc.poll()
     os.close(master)
     elapsed = int((time.monotonic() - start) * 1000)
-    return {"ok": rc == 0, "exit": rc, "sent_q": sent_q,
-            "drained_bytes": drained, "ms": elapsed}
+    return {"ok": rc == 0 and alive_after_flap and sent_q,
+            "exit": rc, "sent_w": sent_w, "alive_after_flap": alive_after_flap,
+            "sent_q": sent_q, "drained_bytes": drained, "ms": elapsed}
 
 
 def compute_score(report: dict) -> dict:
@@ -341,6 +355,9 @@ def render_markdown(report: dict) -> str:
     lines += ["## Human-play smoke",
               f"- ok: {hp.get('ok')} (exit {hp.get('exit')}, drained {hp.get('drained_bytes')}B, "
               f"{hp.get('ms')}ms)",
+              f"- flap key ('w'): sent={hp.get('sent_w')}, alive after flap="
+              f"{hp.get('alive_after_flap')}",
+              f"- quit key ('q'): sent={hp.get('sent_q')}",
               ""]
 
     mut = report.get("mutation", {})
