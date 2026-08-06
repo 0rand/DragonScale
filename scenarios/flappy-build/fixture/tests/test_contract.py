@@ -10,6 +10,7 @@ Run:  python3 -m pytest tests/test_contract.py -q
 
 import pytest
 
+from game import core
 from game.controller import GameController
 
 
@@ -24,6 +25,20 @@ def test_contract_surface():
     c = GameController()
     for m in ("reset", "step", "state", "render", "set_speed", "play"):
         assert callable(getattr(c, m, None)), f"GameController.{m} missing"
+
+
+def test_levels_shape_attributes():
+    """LEVELS entries must expose their values as ATTRIBUTES (.name, .speed,
+    ...), not dict keys. The task prompt specifies 'attributes'; the hidden
+    suite and the passability solver access them as attributes."""
+    assert isinstance(core.LEVELS, tuple)
+    assert len(core.LEVELS) == 4
+    for L in core.LEVELS:
+        for attr in ("name", "speed", "gravity", "flap_velocity",
+                     "gap", "pipe_spacing", "pipes_to_clear"):
+            assert hasattr(L, attr), f"LEVELS entry missing attribute {attr!r}"
+            assert not isinstance(getattr(L, attr), dict), \
+                f"LEVELS entry attribute {attr!r} must not be a dict"
 
 
 def test_reset_returns_none_and_state_ok(ctl):
