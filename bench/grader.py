@@ -285,10 +285,11 @@ def compute_score(report: dict) -> dict:
     return {"total": total, "components": c}
 
 
-def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42):
+def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42,
+          model: str | None = None):
     ts = datetime.now(timezone.utc).isoformat()
     report = {
-        "label": label, "timestamp": ts, "seed": seed,
+        "label": label, "model": model, "timestamp": ts, "seed": seed,
         "versions": {
             "prompt": _sha(scenario / "prompt.md"),
             "reference": _sha(scenario / "fixture" / "reference.md"),
@@ -367,6 +368,7 @@ def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42):
 def render_markdown(report: dict) -> str:
     lines = [f"# DragonScale run: {report['label']}",
              f"`{report['timestamp']}` · seed {report['seed']}",
+             f"**Model under test:** {report.get('model') or 'unknown'}",
              "",
              f"## Verdict: **{report['verdict']['result']}**",
              ""]

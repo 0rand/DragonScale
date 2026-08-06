@@ -54,9 +54,9 @@ runs/<label>/        # sandbox, dispatch logs, report.md/json (gitignored)
 cd dragonscale
 .venv/bin/python -m pytest          # canonical suite (16 tests)
 
-# grade an existing directory (smoke / offline)
+# grade an existing directory (smoke / offline); --model stamps the report
 python3 bench/run.py --scenario flappy-build --label smoke-good \
-    --prebuilt scripts/smoke_good
+    --prebuilt scripts/smoke_good --model "MYPROVIDER/model-name"
 
 # full run: dispatch opencode -> model, then grade
 python3 bench/run.py --scenario flappy-build --label run-oc-001 \

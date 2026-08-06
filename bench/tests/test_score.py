@@ -73,3 +73,53 @@ def test_score_ranks_graded_artifacts():
     broken = _grade("score-rank-broken", "scripts/smoke_broken")
     t = [broken["score"]["total"], good["score"]["total"]]
     assert t[0] < t[1], f"broken={t[0]} good={t[1]}"
+
+
+def test_report_stamps_model_via_cli():
+    """--model must land in report.json and report.md."""
+    label = "score-model-cli"
+    r = subprocess.run(
+        [str(VENV_PY), "bench/run.py", "--scenario", "flappy-build",
+         "--label", label, "--prebuilt", "scripts/smoke_good",
+         "--model", "TESTPROVIDER/Qwen3.6-35B"],
+        cwd=ROOT, capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, r.stderr[-500:]
+    rep = json.loads((ROOT / "runs" / label / "report.json").read_text())
+    assert rep["model"] == "TESTPROVIDER/Qwen3.6-35B"
+    md = (ROOT / "runs" / label / "report.md").read_text()
+    assert "TESTPROVIDER/Qwen3.6-35B" in md
+    assert "Model under test" in md
+
+
+def test_report_model_unknown_without_model():
+    """No model info -> report says unknown, verdict unaffected."""
+    label = "score-model-none"
+    r = subprocess.run(
+        [str(VENV_PY), "bench/run.py", "--scenario", "flappy-build",
+         "--label", label, "--prebuilt", "scripts/smoke_good"],
+        cwd=ROOT, capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, r.stderr[-500:]
+    rep = json.loads((ROOT / "runs" / label / "report.json").read_text())
+    assert rep["model"] is None
+    md = (ROOT / "runs" / label / "report.md").read_text()
+    assert "unknown" in md
+    assert rep["verdict"]["result"] == "PASS"  # model stamping never affects verdict
+
+
+def test_prebuilt_grade_recovers_model_from_dispatch_json(tmp_path):
+    """Re-grading a dispatched run's label recovers the model from dispatch.json."""
+    label = "score-model-dispatch"
+    run_dir = ROOT / "runs" / label
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "dispatch.json").write_text(json.dumps(
+        {"runner": "opencode", "provider": "MEDIABRIDGE",
+         "model": "MEDIABRIDGE/main", "workdir": str(run_dir / "sandbox"),
+         "exit": 0, "stdout_bytes": 0, "stderr_bytes": 0}))
+    r = subprocess.run(
+        [str(VENV_PY), "bench/run.py", "--scenario", "flappy-build",
+         "--label", label, "--prebuilt", "scripts/smoke_good"],
+        cwd=ROOT, capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, r.stderr[-500:]
+    rep = json.loads((run_dir / "report.json").read_text())
+    assert rep["model"] == "MEDIABRIDGE/main", rep["model"]
+    assert "MEDIABRIDGE/main" in (run_dir / "report.md").read_text()

@@ -56,6 +56,10 @@ def main():
     sandbox = Path(args.workdir).expanduser().resolve() if args.workdir \
         else runs / "sandbox"
 
+    # Model identity for the report: explicit --model wins; else the
+    # dispatched model; else whatever dispatch.json records (re-grades).
+    model_label = args.model
+
     if args.prebuilt:
         src = (ROOT / args.prebuilt).resolve()
         if src == sandbox.resolve():
@@ -64,6 +68,10 @@ def main():
         if sandbox.exists():
             shutil.rmtree(sandbox)
         shutil.copytree(src, sandbox)
+        if not model_label:
+            dj = runs / "dispatch.json"
+            if dj.exists():
+                model_label = json.loads(dj.read_text()).get("model")
     else:
         if sandbox.exists():
             shutil.rmtree(sandbox)
@@ -73,6 +81,7 @@ def main():
         if args.runner == "jcode":
             res = dispatch_jcode(sandbox, scenario / "prompt.md", args.provider,
                                  timeout=args.timeout)
+            model_label = model_label or args.provider
         else:
             model = args.model
             if not model:
@@ -82,8 +91,9 @@ def main():
                 model = f"{args.provider}/{model}"
             res = dispatch_opencode(sandbox, scenario / "prompt.md", model,
                                     timeout=args.timeout)
+            model_label = model
         (runs / "dispatch.json").write_text(json.dumps(
-            {"runner": args.runner, "provider": args.provider, "model": args.model,
+            {"runner": args.runner, "provider": args.provider, "model": model_label,
              "workdir": str(sandbox), "exit": res["exit"],
              "stdout_bytes": len(res["stdout"]), "stderr_bytes": len(res["stderr"])},
             indent=2))
@@ -92,7 +102,7 @@ def main():
 
     from bench.grader import grade, render_markdown
 
-    report = grade(sandbox, scenario, args.label, seed=args.seed)
+    report = grade(sandbox, scenario, args.label, seed=args.seed, model=model_label)
     (runs / "report.json").write_text(json.dumps(report, indent=2))
     (runs / "report.md").write_text(render_markdown(report))
 
