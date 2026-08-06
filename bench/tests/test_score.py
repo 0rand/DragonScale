@@ -1,0 +1,75 @@
+"""Unit tests for the deterministic numeric score rubric.
+
+Covers: compute_score determinism (same report -> same score), component
+math (hidden_suite proportional, mutation sensitivity weighting, git
+structure points), and the expected ranking of the four graded artifacts.
+"""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from bench.grader import compute_score
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+VENV_PY = ROOT / ".venv" / "bin" / "python"
+
+
+def _grade(label, prebuilt):
+    r = subprocess.run(
+        [str(VENV_PY), "bench/run.py", "--scenario", "flappy-build",
+         "--label", label, "--prebuilt", prebuilt],
+        cwd=ROOT, capture_output=True, text=True, timeout=300)
+    return json.loads((ROOT / "runs" / label / "report.json").read_text())
+
+
+def test_score_is_deterministic():
+    a = _grade("score-det-a", "scripts/smoke_good")
+    b = _grade("score-det-b", "scripts/smoke_good")
+    assert a["score"]["total"] == b["score"]["total"]
+    assert a["score"]["components"] == b["score"]["components"]
+
+
+def test_score_hidden_proportional():
+    """hidden_suite = passed/total * 30."""
+    rep = {
+        "hidden_tests": {"passed": 6, "failed": 2, "errors": 0},
+        "solver": {f"level_{i}": {"passable": True, "replay_ok": True}
+                   for i in range(4)},
+        "model_tests": {"passed": 10, "failed": 0, "errors": 0},
+        "mutation": {"sensitivity": 1.0},
+        "visible_tests": {"passed": 13, "failed": 0, "errors": 0},
+        "git": {"init": True, "commits": 5, "dirty": [],
+                "messages": ["one", "two", "three", "four", "five"]},
+        "human_play": {"ok": True},
+    }
+    sc = compute_score(rep)
+    assert sc["components"]["hidden_suite"] == 22.5  # 6/8 * 30
+
+
+def test_score_weights_sum_to_100_when_perfect():
+    rep = {
+        "hidden_tests": {"passed": 8, "failed": 0, "errors": 0},
+        "solver": {f"level_{i}": {"passable": True, "replay_ok": True}
+                   for i in range(4)},
+        "model_tests": {"passed": 20, "failed": 0, "errors": 0},
+        "mutation": {"sensitivity": 1.0},
+        "visible_tests": {"passed": 13, "failed": 0, "errors": 0},
+        "git": {"init": True, "commits": 3, "dirty": [],
+                "messages": ["scaffold the project", "core game logic",
+                             "tests and tooling"]},
+        "human_play": {"ok": True},
+    }
+    sc = compute_score(rep)
+    assert sc["total"] == 100.0, sc
+
+
+def test_score_ranks_graded_artifacts():
+    """The four graded artifacts must rank: DS >= smoke-good > 35B > smoke-broken."""
+    good = _grade("score-rank-good", "scripts/smoke_good")
+    broken = _grade("score-rank-broken", "scripts/smoke_broken")
+    t = [broken["score"]["total"], good["score"]["total"]]
+    assert t[0] < t[1], f"broken={t[0]} good={t[1]}"

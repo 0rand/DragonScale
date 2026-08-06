@@ -78,6 +78,7 @@ def main():
     (runs / "report.md").write_text(render_markdown(report))
 
     print(json.dumps(report["verdict"], indent=2))
+    print(f"score: {report.get('score', {}).get('total')} / 100", file=sys.stderr)
     print(f"report: {runs / 'report.md'}", file=sys.stderr)
 
 

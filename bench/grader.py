@@ -82,6 +82,156 @@ def solve_via_import(sandbox: Path, seed: int):
         return {"solver_error": f"{type(e).__name__}: {e}"}
 
 
+# --------------------------------------------------------------------------
+# Deterministic numeric score (no LLM in the loop).
+# Weights sum to 100. Every component is computed from artifacts.
+# --------------------------------------------------------------------------
+
+def _mutation_sensitivity(sandbox: Path, model_tests_path: Path) -> dict:
+    """Run the model's own tests against a MUTATED copy of its core.
+
+    Mutation: level-0 gravity 12.0 -> 14.0 (the smoke_broken sabotage).
+    Tests that fail under mutation have teeth; a suite that still passes
+    against sabotaged physics is vacuous. sensitivity = (failed+errors)/total.
+    """
+    import shutil
+    import tempfile
+
+    if not model_tests_path.exists():
+        return {"applicable": False, "reason": "no model tests",
+                "sensitivity": 0.0, "total": 0, "failed": 0}
+    tmp = Path(tempfile.mkdtemp(prefix="dragonscale-mut-"))
+    shutil.copytree(sandbox, tmp, dirs_exist_ok=True)
+    try:
+        core_p = tmp / "game" / "core.py"
+        if not core_p.exists():
+            return {"applicable": False, "reason": "no game/core.py",
+                    "sensitivity": 0.0, "total": 0, "failed": 0}
+        src = core_p.read_text()
+        # Sabotage: level-0 gravity 12.0 -> 14.0. Works for positional Level()
+        # tuples (flappsy), dict LEVELS, and dataclass forms — the value
+        # 12.0 must appear literally (hidden suite asserts it).
+        m = re.search(r"12\.0", src)
+        if not m:
+            return {"applicable": False, "reason": "12.0 not found",
+                    "sensitivity": 0.0, "total": 0, "failed": 0}
+        mutated = src[:m.start()] + "14.0" + src[m.end():]
+        core_p.write_text(mutated)
+        res = _pytest_result(tmp, tmp / "tests" / "test_game.py")
+        total = res["passed"] + res["failed"] + res["errors"]
+        failed = res["failed"] + res["errors"]
+        return {"applicable": True,
+                "sensitivity": round(failed / total, 4) if total else 0.0,
+                "total": total, "failed": failed}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _human_play_smoke(sandbox: Path) -> dict:
+    """Launch `python3 -m game` in a PTY, drain output, send 'q', expect exit 0.
+
+    Proves the game a human would actually run: curses/keyboard init, the
+    key loop alive (it must render and read input), and a clean quit path.
+    """
+    import pty
+    import select
+    import time
+
+    start = time.monotonic()
+    master, slave = pty.openpty()
+    try:
+        proc = subprocess.Popen(
+            [str(VENV_PY), "-m", "game"],
+            cwd=str(sandbox), stdin=slave, stdout=slave, stderr=slave,
+            env={**os.environ, "TERM": "xterm-256color"}, close_fds=True)
+    except Exception as e:  # noqa: BLE001
+        os.close(master)
+        os.close(slave)
+        return {"ok": False, "error": f"spawn failed: {e}", "ms": int((time.monotonic() - start) * 1000)}
+    os.close(slave)
+
+    sent_q = False
+    drained = 0
+    elapsed = int((time.monotonic() - start) * 1000)
+    while time.monotonic() - start < 15:
+        r, _, _ = select.select([master], [], [], 0.1)
+        if r:
+            try:
+                chunk = os.read(master, 65536)
+                drained += len(chunk)
+            except OSError:
+                break
+        if time.monotonic() - start > 1.5 and not sent_q:
+            try:
+                os.write(master, b"q")
+                sent_q = True
+            except OSError:
+                pass
+        if proc.poll() is not None:
+            break
+        time.sleep(0.05)
+    if proc.poll() is None:
+        proc.kill()
+        proc.wait()
+    rc = proc.poll()
+    os.close(master)
+    elapsed = int((time.monotonic() - start) * 1000)
+    return {"ok": rc == 0, "exit": rc, "sent_q": sent_q,
+            "drained_bytes": drained, "ms": elapsed}
+
+
+def compute_score(report: dict) -> dict:
+    """Deterministic 0-100 rubric from the graded report. No LLM."""
+    c = {}
+
+    hid = report["hidden_tests"]
+    hid_total = hid.get("passed", 0) + hid.get("failed", 0) + hid.get("errors", 0)
+    c["hidden_suite"] = round(hid.get("passed", 0) / hid_total * 30, 2) if hid_total else 0.0
+
+    sol = report["solver"]
+    if "import_error" in sol or "solver_error" in sol:
+        c["passability"], c["replay"] = 0.0, 0.0
+    else:
+        lvls = [sol[f"level_{i}"] for i in range(4) if f"level_{i}" in sol]
+        n = max(len(lvls), 1)
+        c["passability"] = round(sum(1 for l in lvls if l.get("passable")) / n * 15, 2)
+        c["replay"] = round(sum(1 for l in lvls if l.get("replay_ok")) / n * 10, 2)
+
+    mt = report["model_tests"]
+    if mt.get("missing"):
+        c["own_tests"], c["mutation"] = 0.0, 0.0
+    else:
+        mt_total = mt.get("passed", 0) + mt.get("failed", 0) + mt.get("errors", 0)
+        c["own_tests"] = round(mt.get("passed", 0) / mt_total * 8, 2) if mt_total else 0.0
+        c["mutation"] = round(report.get("mutation", {}).get("sensitivity", 0.0) * 7, 2)
+
+    vis = report["visible_tests"]
+    vis_total = vis.get("passed", 0) + vis.get("failed", 0) + vis.get("errors", 0)
+    c["contract"] = round(vis.get("passed", 0) / vis_total * 10, 2) if vis_total else 0.0
+
+    g = report["git"]
+    if not g.get("init"):
+        c["git"] = 0.0
+    else:
+        commits = g.get("commits", 0)
+        msgs = g.get("messages", [])
+        trivial = sum(1 for m in msgs
+                      if len(m.strip()) < 8 or m.strip().lower() in ("wip", "init", "update", "commit"))
+        nontriv_ratio = 1.0 if not msgs else (len(msgs) - min(trivial, len(msgs))) / len(msgs)
+        c["git"] = round(
+            3.0                                # repo initialized
+            + 6.0 * min(commits, 3) / 3        # >= 3 logical commits
+            + (3.0 if not g.get("dirty") else 0.0)   # clean working tree
+            + (3.0 if nontriv_ratio >= 0.5 else 0.0),  # meaningful messages
+            2)
+
+    hp = report.get("human_play", {})
+    c["human_play"] = 5.0 if hp.get("ok") else 0.0
+
+    total = round(sum(c.values()), 2)
+    return {"total": total, "components": c}
+
+
 def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42):
     ts = datetime.now(timezone.utc).isoformat()
     report = {
@@ -117,6 +267,12 @@ def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42):
 
     report["solver"] = solve_via_import(sandbox, seed)
 
+    # Mutation sensitivity: do the model's OWN tests catch a physics sabotage?
+    report["mutation"] = _mutation_sensitivity(sandbox, sandbox / "tests" / "test_game.py")
+
+    # Human-play smoke: can a human actually launch + quit the game?
+    report["human_play"] = _human_play_smoke(sandbox)
+
     # Trace (only when a dispatch happened)
     dispatch_log = sandbox.parent / "dispatch.stdout.log"
     if dispatch_log.exists():
@@ -124,6 +280,9 @@ def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42):
         report["trace"] = trace.summarize(dispatch_log.read_text(errors="replace"))
     else:
         report["trace"] = None
+
+    # Deterministic numeric score (rubric, no LLM)
+    report["score"] = compute_score(report)
 
     # ---- verdict ---------------------------------------------------------
     reasons = []
@@ -165,11 +324,31 @@ def render_markdown(report: dict) -> str:
     else:
         lines += ["All gates green.", ""]
 
+    sc = report.get("score", {})
+    lines += ["## Score (deterministic rubric, 0-100, no LLM)",
+              f"- **total: {sc.get('total')} / 100**", ""]
+    for k, v in sc.get("components", {}).items():
+        lines += [f"- {k}: {v}"]
+    lines += [""]
+
     lines += ["## Versions", "```json", json.dumps(report["versions"], indent=2), "```", ""]
     lines += ["## Git", f"- init: {report['git'].get('init')}", 
               f"- commits: {report['git'].get('commits')}",
               f"- messages: {report['git'].get('messages')}",
               f"- dirty: {report['git'].get('dirty')}", ""]
+
+    hp = report.get("human_play", {})
+    lines += ["## Human-play smoke",
+              f"- ok: {hp.get('ok')} (exit {hp.get('exit')}, drained {hp.get('drained_bytes')}B, "
+              f"{hp.get('ms')}ms)",
+              ""]
+
+    mut = report.get("mutation", {})
+    lines += ["## Mutation sensitivity",
+              f"- applicable: {mut.get('applicable')} ({mut.get('reason', 'n/a')})",
+              f"- sensitivity: {mut.get('sensitivity')} ({mut.get('failed')}/{mut.get('total')} "
+              f"own tests fail under gravity 12->14)",
+              ""]
 
     for name in ("visible_tests", "model_tests", "hidden_tests"):
         t = report[name]
