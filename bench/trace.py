@@ -35,6 +35,21 @@ def _is_tool_call(node: dict) -> bool:
 
 
 def _normalize(node: dict) -> dict:
+    """Normalize a tool-call dict from either harness shape.
+
+    jcode:    {"type":"tool_use","name":...,"input":...,"output":...,"is_error":bool}
+    opencode: {"type":"tool_use","part":{"type":"tool","tool":"read",
+               "state":{"status":"completed|error","input":...,"output":...}}}
+    """
+    part = node.get("part") if isinstance(node.get("part"), dict) else None
+    if part is not None:
+        state = part.get("state") if isinstance(part.get("state"), dict) else {}
+        tool = part.get("tool") or node.get("name")
+        inp = state.get("input") or part.get("input") or node.get("input")
+        out = state.get("output") or part.get("output") or node.get("output")
+        err = state.get("status") in ("error", "cancelled") or bool(part.get("is_error"))
+        return {"tool": str(tool) if tool is not None else "?",
+                "input": inp, "output": out, "is_error": bool(err)}
     tool = next((node[k] for k in NAME_KEYS if k in node), None)
     inp = next((node[k] for k in INPUT_KEYS if k in node), None)
     out = next((node[k] for k in OUTPUT_KEYS if k in node), None)
@@ -47,6 +62,14 @@ def _normalize(node: dict) -> dict:
 
 def _walk(node, events: list):
     if isinstance(node, dict):
+        # opencode shape: outer event carries the whole part; count once.
+        if node.get("type") in TOOL_TYPES and isinstance(node.get("part"), dict):
+            events.append(_normalize(node))
+            for v in node.values():
+                if v is node.get("part"):
+                    continue
+                _walk(v, events)
+            return
         if _is_tool_call(node):
             events.append(_normalize(node))
         for v in node.values():
