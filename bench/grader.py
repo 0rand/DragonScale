@@ -813,10 +813,17 @@ def compute_score(report: dict) -> dict:
 
 
 def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42,
-          model: str | None = None):
+          model: str | None = None, kind: str = "model"):
+    """Grade a sandbox. ``kind``: 'model' (capability measurement — the
+    report leads with score + defect profile, no aggregate verdict) or
+    'control' (grader self-validation — smoke fixtures keep the
+    PASS/FAIL verdict headline). The verdict is ALWAYS in the JSON
+    (machine interface, regression tests); only the markdown framing
+    differs."""
     ts = datetime.now(timezone.utc).isoformat()
     report = {
         "label": label, "model": model, "timestamp": ts, "seed": seed,
+        "kind": kind,
         "versions": {
             "prompt": _sha(scenario / "prompt.md"),
             "reference": _sha(scenario / "fixture" / "reference.md"),
@@ -924,19 +931,31 @@ def render_markdown(report: dict) -> str:
     lines = [f"# DragonScale run: {report['label']}",
              f"`{report['timestamp']}` · seed {report['seed']}",
              f"**Model under test:** {report.get('model') or 'unknown'}",
-             "",
-             f"## Verdict: **{report['verdict']['result']}**",
              ""]
-    if report["verdict"]["reasons"]:
-        lines += ["Reasons:"]
-        lines += [f"- {r}" for r in report["verdict"]["reasons"]]
-        lines += [""]
-    else:
-        lines += ["All gates green.", ""]
-
     sc = report.get("score", {})
-    lines += ["## Score (deterministic rubric, 0-100, no LLM)",
-              f"- **total: {sc.get('total')} / 100**", ""]
+    reasons = report["verdict"]["reasons"]
+    if report.get("kind") == "control":
+        # Controls (smoke fixtures): the verdict is the load-bearing
+        # grader self-check — keep the PASS/FAIL headline.
+        lines += [f"## Verdict: **{report['verdict']['result']}**", ""]
+        if reasons:
+            lines += ["Reasons:"] + [f"- {r}" for r in reasons] + [""]
+        else:
+            lines += ["All gates green.", ""]
+        lines += ["## Score (deterministic rubric, 0-100, no LLM)",
+                  f"- **total: {sc.get('total')} / 100**", ""]
+    else:
+        # Model runs: capability measurement, not a deployment gate.
+        # Lead with the score; reason strings are a defect profile, not
+        # an aggregate verdict (the verdict still lives in report.json).
+        lines += [f"## Score: **{sc.get('total')} / 100**", ""]
+        if reasons:
+            lines += ["### Defect profile"]
+            lines += [f"- {r}" for r in reasons]
+            lines += [""]
+        else:
+            lines += ["No gate failures.", ""]
+        lines += ["## Score components (deterministic rubric, 0-100, no LLM)", ""]
     for k, v in sc.get("components", {}).items():
         lines += [f"- {k}: {v}"]
     lines += [""]

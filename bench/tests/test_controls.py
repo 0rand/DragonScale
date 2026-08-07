@@ -89,6 +89,49 @@ def test_bird_row_in_tail():
     assert _bird_row_in_tail(b"no bird here") is None
 
 
+def test_report_kind_rendering():
+    """Model-run reports lead with score + defect profile (NO aggregate
+    verdict headline); control reports keep the PASS/FAIL verdict.
+
+    The verdict is a deployment gate, not a capability measurement —
+    a single binary made 35B 'FAIL' while Primo played it and called it
+    'really good'. Controls (smoke fixtures) keep the verdict because
+    it is the load-bearing grader self-check."""
+    from bench.grader import render_markdown
+
+    base = {
+        "label": "x", "model": "m", "timestamp": "t", "seed": 42,
+        "kind": "model",
+        "score": {"total": 79.5,
+                  "components": {"hidden_suite": 25.0, "human_play": 0.0}},
+        "verdict": {"result": "FAIL",
+                    "reasons": ["game not human-playable: level-complete "
+                                "progression: Enter does not advance"]},
+        "versions": {}, "git": {}, "human_play": {}, "mutation": {},
+        "packaging": {}, "visible_tests": {"missing": True},
+        "model_tests": {"missing": True}, "hidden_tests": {"missing": True},
+        "solver": {lv: {"passable": True, "path_len": 0, "replay_ok": True,
+                        "final_status": "LEVEL_COMPLETE", "final_score": 0,
+                        "probe_ticks": 0, "probe_ended": "x"}
+                   for lv in ("level_0", "level_1", "level_2", "level_3")},
+        "trace": None,
+    }
+
+    md = render_markdown(base)
+    assert "## Score: **79.5 / 100**" in md
+    assert "## Verdict:" not in md
+    assert "### Defect profile" in md
+    assert "Enter does not advance" in md
+    # Score components still present, just not headed by a verdict.
+    assert "## Score components" in md
+    assert "- hidden_suite: 25.0" in md
+
+    base["kind"] = "control"
+    md2 = render_markdown(base)
+    assert "## Verdict: **FAIL**" in md2
+    assert "### Defect profile" not in md2
+
+
 def test_smoke_broken_seeded_fails_stably():
     """Seeded physics-wrong control: FAIL (hidden suite) with STABLE score.
 

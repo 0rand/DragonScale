@@ -102,7 +102,16 @@ def main():
 
     from bench.grader import grade, render_markdown
 
-    report = grade(sandbox, scenario, args.label, seed=args.seed, model=model_label)
+    # Controls = --prebuilt pointing at a smoke fixture (scripts/smoke_*):
+    # the PASS/FAIL verdict is load-bearing grader self-validation.
+    # Everything else (dispatched runs, re-grades of model sandboxes) is
+    # a capability measurement — report leads with score + defect profile.
+    kind = "control" if (args.prebuilt
+                         and args.prebuilt.replace("\\", "/").startswith("scripts/")) \
+        else "model"
+
+    report = grade(sandbox, scenario, args.label, seed=args.seed, model=model_label,
+                   kind=kind)
     (runs / "report.json").write_text(json.dumps(report, indent=2))
     (runs / "report.md").write_text(render_markdown(report))
 
