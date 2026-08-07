@@ -154,13 +154,19 @@ def _human_play_smoke(sandbox: Path) -> dict:
 
     from bench import ansi_model
 
+    # Don't let the grader's own game launch pollute the sandbox: python3 -m game
+    # would write __pycache__/*.pyc INTO the sandbox, which then dirties the git
+    # tree we grade (untracked files → git gate loses points). Bytecode must not
+    # be written by the grader.
+    smoke_env = {**os.environ, "TERM": "xterm-256color", "PYTHONDONTWRITEBYTECODE": "1"}
+
     start = time.monotonic()
     master, slave = pty.openpty()
     try:
         proc = subprocess.Popen(
             [str(VENV_PY), "-m", "game"],
             cwd=str(sandbox), stdin=slave, stdout=slave, stderr=slave,
-            env={**os.environ, "TERM": "xterm-256color"}, close_fds=True)
+            env=smoke_env, close_fds=True)
     except Exception as e:  # noqa: BLE001
         os.close(master)
         os.close(slave)
@@ -219,7 +225,7 @@ def _human_play_smoke(sandbox: Path) -> dict:
         proc2 = subprocess.Popen(
             [str(VENV_PY), "-m", "game"],
             cwd=str(sandbox), stdin=slave2, stdout=slave2, stderr=slave2,
-            env={**os.environ, "TERM": "xterm-256color"}, close_fds=True)
+            env=smoke_env, close_fds=True)
         os.close(slave2)
         out2 = b""
         end2 = time.monotonic() + 2.0

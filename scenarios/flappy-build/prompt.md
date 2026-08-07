@@ -19,7 +19,9 @@ reference document, a contract test suite, and this task.
    state.
 4. `game/__main__.py` — human play mode: `python3 -m game` starts a
    keyboard session using the SAME controller. Space/W/Up = flap,
-   P = pause, R = restart, Q = quit.
+   P = pause, R = restart, Q = quit. The loop advances time at TICK_RATE
+   even when no key is pressed (`step("NONE")` on idle), and renders to
+   the ACTUAL terminal size (see Requirements).
 5. `tests/test_game.py` — your own pytest test suite. It must pass and it
    must be meaningful (see reference.md §10.1).
 6. `pyproject.toml` — project metadata, `requires-python >= 3.11`,
@@ -72,13 +74,28 @@ Where the document is self-contradictory, the **Current Tuning** section
   actions (reference.md §4.6).
 - Levels must be actually completable: every level's pipe gaps must be
   geometrically reachable by a valid flap sequence.
+- **Terminal size is VARIABLE.** The game must render to the actual
+  terminal dimensions at runtime (e.g. curses, `os.get_terminal_size()`,
+  or `COLUMNS`/`LINES`), never to a hardcoded 80x24 frame. On any
+  terminal ≥ 50x18 the whole playfield must be visible with no frame
+  stacking, no scroll artifacts, and no clipped pipes. reference.md's
+  "80x24 by default" is a DEFAULT size, not a fixed one.
+- **Time advances continuously.** The play loop must advance the world at
+  TICK_RATE (`dt = 1/TICK_RATE`) on every tick, whether or not a key is
+  pressed — call `step("NONE")` on idle iterations. Key presses steer
+  (flap/pause/restart/quit); they must never be the sole driver of time.
+  Make this explicit in `play()` / `__main__.py` (e.g. a loop that steps
+  at TICK_RATE and reads input with a short timeout).
 - Verify your work like an engineer:
   1. Run `tests/test_contract.py` and your own `tests/test_game.py` —
      iterate until green.
   2. Prove the game is playable via the API: drive level 0 through
      `GameController` (write a tiny script or autopilot) and confirm
      `LEVEL_COMPLETE` is reachable, not just claimed.
-  3. Commit your work in logical commits.
+  3. Prove human playability: run `python3 -m game` in a real terminal
+     and confirm the bird falls and pipes move with NO key pressed, and
+     that a resized (narrow/short) terminal still renders cleanly.
+  4. Commit your work in logical commits.
 
 ## Constraints
 
