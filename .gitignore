@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 scripts/smoke_good/
 scripts/smoke_broken/
+scripts/smoke_broken_seeded/
