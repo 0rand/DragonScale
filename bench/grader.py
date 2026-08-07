@@ -225,12 +225,83 @@ def _bird_row_in_tail(tail: bytes) -> int | None:
     for sep in ("\x1b[2J\x1b[H", "\x1b[H\x1b[J", "\x1b[2J", "\x1b[H\x1b[2J"):
         if sep in text:
             text = text.rsplit(sep, 1)[-1]
-    lines = text.splitlines()
+    return _bird_row_in_lines(text.splitlines())
+
+
+def _bird_row_in_lines(lines: list[str]) -> int | None:
+    """Row index of the bird glyph in a frame's lines, or None."""
     for i, ln in enumerate(lines[2:-2]):  # skip header/ground lines
         for col in (_BIRD_COL, _BIRD_COL - 1, _BIRD_COL + 1):
             if len(ln) > col and ln[col] in _BIRD_GLYPHS:
                 return i + 2
     return None
+
+
+# Characters that are NOT pipe wall: sky, dots, fireworks, bird glyphs.
+_BG_CHARS = set(" .*+x\u2022\u2726\u2739@\u1767\u1724>vB|")
+
+
+def _next_pipe_gap_center(lines: list[str]) -> int | None:
+    """Midpoint row of the next pipe's gap ahead of the bird, or None.
+
+    Scans columns right of the bird for a column that has solid wall above
+    AND below a contiguous background band (the gap). Background chars are
+    space/dots/fireworks; anything else counts as wall. Header (rows 0-1),
+    overlay (h-2) and ground (h-3+) are excluded.
+    """
+    if len(lines) < 8:
+        return None
+    width = len(lines[0])
+    for col in range(_BIRD_COL + 2, width):
+        band = [lines[r][col] if col < len(lines[r]) else " "
+                for r in range(2, len(lines) - 3)]
+        gaps = []
+        i = 0
+        while i < len(band):
+            if band[i] in _BG_CHARS:
+                j = i
+                while j < len(band) and band[j] in _BG_CHARS:
+                    j += 1
+                gaps.append((i, j))
+                i = j
+            else:
+                i += 1
+        for a, b in gaps:
+            if a > 0 and b < len(band):
+                above = any(c not in _BG_CHARS for c in band[:a])
+                below = any(c not in _BG_CHARS for c in band[b:])
+                if above and below:
+                    return 2 + (a + b) // 2
+    return None
+
+
+def _advance_binding_in(sandbox: Path) -> str:
+    """Static scan for a level-advance key binding in the human loop.
+
+    Reference.md §2: Enter advances to the next level. Reports whether the
+    sandbox's human-play code binds a key (Enter/newline, NEXT_LEVEL, or an
+    advance call) to progress past LEVEL_COMPLETE. Informational only —
+    the hard gate is the world-settles check. Values: 'enter-bind',
+    'next-level', 'advance-call', 'none', 'unreadable'.
+    """
+    try:
+        hits = []
+        for fn in ("game/__main__.py", "game/controller.py", "game/render.py"):
+            p = sandbox / fn
+            if not p.exists():
+                continue
+            src = p.read_text(encoding="utf-8", errors="replace")
+            if re.search(r"ord\((10|13)\)|343|[\"']\\r[\"']|[\"']\\n[\"']", src):
+                hits.append("enter-bind")
+            if "NEXT_LEVEL" in src or "next_level" in src:
+                hits.append("next-level")
+            if re.search(r"\.advance\s*\(|advance_level|advance\s*\(", src):
+                hits.append("advance-call")
+        if not hits:
+            return "none"
+        return "+".join(dict.fromkeys(hits))
+    except Exception:  # noqa: BLE001
+        return "unreadable"
 
 
 def _human_play_smoke(sandbox: Path) -> dict:
@@ -444,16 +515,111 @@ def _human_play_smoke(sandbox: Path) -> dict:
     except Exception:  # noqa: BLE001
         flap_worked = None  # unverifiable — do not fail on parse/spawn miss
 
+    # ── Level-complete progression: does the game ever END? ──────────
+    # reference.md: step() must NOT advance a non-RUNNING world; the human
+    # loop advances a completed level on Enter. A game that KEEPS
+    # SIMULATING at LEVEL_COMPLETE (like the 27B crown game: physics keeps
+    # ticking under LEVEL_COMPLETE, score climbs, 90 random fireworks
+    # reshuffled every frame = the user's "hailstorm") violates the
+    # contract and NEVER settles — the "never ends" defect. Probe
+    # (deterministic, in-process): autopilot the sandbox's OWN controller
+    # to LEVEL_COMPLETE, then verify the world freezes (conforming) or
+    # auto-advances. None = unverifiable (autopilot can't complete) —
+    # never a failure.
+    lc_advances = lc_how = None
+    lc_detail = "unverifiable (autopilot did not reach LEVEL_COMPLETE)"
+    try:
+        # Purge any cached 'game' modules — the probe runs in-process and
+        # a PREVIOUS sandbox's controller would otherwise be reused
+        # (sys.path insert does NOT clear sys.modules), silently grading
+        # the wrong game (the smoke_good-false-positive trap).
+        for _k in [k for k in list(sys.modules)
+                   if k == "game" or k.startswith("game.")]:
+            del sys.modules[_k]
+        sys.path.insert(0, str(sandbox))
+        from game.controller import GameController  # noqa: PLC0415
+        sys.path.pop(0)
+        for _seed in (0, 42):
+            try:
+                _ctl = GameController()
+                try:
+                    _ctl.reset(level=0, seed=_seed)
+                except TypeError:
+                    _ctl.reset(0)
+                _done = False
+                _st = None
+                for _t in range(900):
+                    _st = _ctl.state()
+                    _status = _st.get("status")
+                    if _status in ("LEVEL_COMPLETE", "WON"):
+                        _done = True
+                        break
+                    if _status != "RUNNING":
+                        break
+                    _nxt = min((p for p in _st.get("pipes", [])
+                                if p["x"] + 4 > 10),
+                               key=lambda p: p["x"], default=None)
+                    _ctl.step("FLAP" if (_nxt is not None
+                                         and _st["bird"]["y"] > _nxt["gap_y"])
+                               else "NONE")
+                if not _done or _st is None:
+                    continue
+                if _status == "WON":
+                    lc_advances, lc_how = True, "won"
+                    lc_detail = "game ends with WON"
+                    break
+                # LEVEL_COMPLETE reached — does the world settle?
+                _snap = (_st["tick"], _st["score"],
+                         round(_st["bird"]["y"], 3),
+                         tuple(round(p["x"], 1) for p in _st["pipes"]))
+                _settled = True
+                for _ in range(120):  # 6s at 20Hz
+                    _st2 = _ctl.step("NONE")
+                    _s2 = _st2.get("status")
+                    if _s2 not in ("LEVEL_COMPLETE", "WON"):
+                        lc_advances, lc_how = True, "auto"
+                        lc_detail = f"auto-advanced ({_s2})"
+                        _settled = False
+                        break
+                    _snap2 = (_st2["tick"], _st2["score"],
+                              round(_st2["bird"]["y"], 3),
+                              tuple(round(p["x"], 1) for p in _st2["pipes"]))
+                    if _snap2 != _snap:
+                        _settled = False
+                        break
+                if lc_advances is not None:
+                    break
+                if not _settled:
+                    lc_advances, lc_how = False, None
+                    lc_detail = ("world keeps simulating at LEVEL_COMPLETE "
+                                 "(never settles; step() must not advance a "
+                                 "non-RUNNING world per reference.md)")
+                else:
+                    # Freezes at completion (conforming). Loop-level advance
+                    # affordance (Enter) reported as info, not gated here.
+                    _adv_binding = _advance_binding_in(sandbox)
+                    lc_advances, lc_how = True, "freeze"
+                    lc_detail = ("freezes at LEVEL_COMPLETE (conforming); "
+                                 f"loop advance binding: {_adv_binding}")
+                break
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        lc_advances, lc_how = None, None
+        lc_detail = "unverifiable (probe error)"
+
     elapsed = int((time.monotonic() - start) * 1000)
     return {"ok": rc == 0 and alive_after_flap and sent_q and overflow == 0
                   and idle_progressed and ctrlc_ok
-                  and flap_worked is not False,
+                  and flap_worked is not False
+                  and lc_advances is not False,
             "exit": rc, "sent_w": sent_w, "alive_after_flap": alive_after_flap,
             "sent_q": sent_q, "drained_bytes": drained, "ms": elapsed,
             "overflow_writes": overflow, "small_terminal_ok": overflow == 0,
             "idle_progressed": idle_progressed, "sig1_len": len(sig1), "sig2_len": len(sig2),
             "ctrlc_ok": ctrlc_ok, "ctrlc_exit": ctrlc_rc, "ctrlc_isig": ctrlc_isig,
-            "flap_worked": flap_worked}
+            "flap_worked": flap_worked,
+            "lc_advances": lc_advances, "lc_how": lc_how, "lc_detail": lc_detail}
 
 
 def compute_score(report: dict) -> dict:
@@ -613,6 +779,9 @@ def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42,
                 bits.append("Ctrl+C trap (raw mode, ISIG off)")
             if hp.get("flap_worked") is False:
                 bits.append("flap key dead (bird did not move up on 'w')")
+            if hp.get("lc_advances") is False:
+                bits.append("level-complete progression: "
+                            + hp.get("lc_detail", "game never advances past LEVEL_COMPLETE"))
             if hp.get("exit") != 0:
                 bits.append(f"no clean quit (exit {hp.get('exit')})")
             reasons.append("game not human-playable: " + "; ".join(bits) if bits
@@ -657,6 +826,8 @@ def render_markdown(report: dict) -> str:
               f"{hp.get('alive_after_flap')}",
               f"- flap efficacy: {hp.get('flap_worked')} "
               f"(bird moved UP after 'w'; None = unverifiable render)",
+              f"- level-complete progression: {hp.get('lc_advances')} "
+              f"({hp.get('lc_detail')})",
               f"- quit key ('q'): sent={hp.get('sent_q')}",
               f"- idle time progression: {hp.get('idle_progressed')} "
               f"(frame {'changed' if hp.get('idle_progressed') else 'SAME'} with no input)",

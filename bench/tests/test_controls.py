@@ -29,6 +29,18 @@ def test_smoke_broken_fails():
     assert _grade("pytest-broken", "scripts/smoke_broken")["result"] == "FAIL"
 
 
+def test_smoke_good_lc_probe_cached_module():
+    """Regression: the level-complete probe must not reuse a cached
+    'game' module from a previous sandbox (same-process trap). Running
+    smoke_good twice in a row must still report lc=True (freezes)."""
+    from bench.grader import _human_play_smoke
+    hp1 = _human_play_smoke(Path("scripts/smoke_good"))
+    hp2 = _human_play_smoke(Path("scripts/smoke_good"))
+    assert hp1["lc_advances"] is not False
+    assert hp2["lc_advances"] is not False
+    assert hp1["ok"] and hp2["ok"]
+
+
 def test_bird_row_in_tail():
     """_bird_row_in_tail finds the bird glyph near column 10 in a frame."""
     from bench.grader import _bird_row_in_tail
