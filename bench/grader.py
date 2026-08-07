@@ -502,11 +502,17 @@ def _human_play_smoke(sandbox: Path) -> dict:
     rc = proc.poll()
     os.close(master)
 
-    # Small-terminal overflow check: 10 rows, short run.
+    # Small-terminal overflow check at the FROZEN SPEC FLOOR (18 rows,
+    # "50x18 up"): a game must fit any terminal at or above the floor.
+    # Was 10 rows (below spec) — false-failed spec-conformant games that
+    # clamp to an 18-row canvas (35B v3: forced h=max(18,...) = the floor
+    # itself; Primo confirmed no overflow on-screen; measured 0 overflow
+    # writes at 18 rows vs ~8.5K at 10). Hardcoded 80x24 frames still
+    # overflow 6 rows past the floor, so the gate keeps its teeth.
     overflow = 0
     try:
         master2, slave2 = pty.openpty()
-        fcntl.ioctl(slave2, termios.TIOCSWINSZ, struct.pack("HHHH", 10, 80, 0, 0))
+        fcntl.ioctl(slave2, termios.TIOCSWINSZ, struct.pack("HHHH", 18, 80, 0, 0))
         proc2 = subprocess.Popen(
             [str(VENV_PY), "-m", "game"],
             cwd=str(sandbox), stdin=slave2, stdout=slave2, stderr=slave2,
@@ -524,7 +530,7 @@ def _human_play_smoke(sandbox: Path) -> dict:
             time.sleep(0.02)
         proc2.kill()
         os.close(master2)
-        overflow = ansi_model.count_overflow_writes(out2, rows=10)
+        overflow = ansi_model.count_overflow_writes(out2, rows=18)
     except Exception as e:  # noqa: BLE001
         overflow = -1  # check unavailable
 
