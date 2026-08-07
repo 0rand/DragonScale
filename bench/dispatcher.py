@@ -90,7 +90,7 @@ def _run(cmd, cwd, timeout):
 
 def dispatch_opencode(sandbox: Path, prompt_path: Path, model: str,
                       timeout: int = 3600) -> dict:
-    """opencode one-shot run. model is 'Provider/Model' (e.g. MEDIABRIDGE/main).
+    """opencode one-shot run. model is 'Provider/Model' (e.g. MYPROVIDER/my-model).
 
     Fresh session per invocation; --dir roots it in the sandbox; build agent
     has full read/edit/bash permissions in the user config.

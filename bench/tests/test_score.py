@@ -136,8 +136,8 @@ def test_prebuilt_grade_recovers_model_from_dispatch_json(tmp_path):
     run_dir = ROOT / "runs" / label
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "dispatch.json").write_text(json.dumps(
-        {"runner": "opencode", "provider": "MEDIABRIDGE",
-         "model": "MEDIABRIDGE/main", "workdir": str(run_dir / "sandbox"),
+        {"runner": "opencode", "provider": "MYPROVIDER",
+         "model": "MYPROVIDER/my-model", "workdir": str(run_dir / "sandbox"),
          "exit": 0, "stdout_bytes": 0, "stderr_bytes": 0}))
     r = subprocess.run(
         [str(VENV_PY), "bench/run.py", "--scenario", "flappy-build",
@@ -145,5 +145,5 @@ def test_prebuilt_grade_recovers_model_from_dispatch_json(tmp_path):
         cwd=ROOT, capture_output=True, text=True, timeout=300)
     assert r.returncode == 0, r.stderr[-500:]
     rep = json.loads((run_dir / "report.json").read_text())
-    assert rep["model"] == "MEDIABRIDGE/main", rep["model"]
-    assert "MEDIABRIDGE/main" in (run_dir / "report.md").read_text()
+    assert rep["model"] == "MYPROVIDER/my-model", rep["model"]
+    assert "MYPROVIDER/my-model" in (run_dir / "report.md").read_text()

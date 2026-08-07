@@ -7,15 +7,15 @@ Usage:
 
   # full run: dispatch opencode -> model, then grade
   python3 bench/run.py --scenario flappy-build --label run-oc-001 \
-      --runner opencode --provider UNOBTANIUM --model Qwen3.6-35B-... --timeout 3600
+      --runner opencode --provider MYPROVIDER --model my-model --timeout 3600
 
   # opencode model as one string (Provider/Model), custom workdir
   python3 bench/run.py --scenario flappy-build --label run-ds-001 \
-      --runner opencode --model MEDIABRIDGE/main --workdir /tmp/ds-sandbox --timeout 3600
+      --runner opencode --model MYPROVIDER/my-model --workdir /tmp/ds-sandbox --timeout 3600
 
   # jcode fallback
   python3 bench/run.py --scenario flappy-build --label run-jc-001 \
-      --runner jcode --provider omlx-35b --timeout 3600
+      --runner jcode --provider my-provider --timeout 3600
 """
 
 from __future__ import annotations

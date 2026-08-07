@@ -23,7 +23,7 @@ by a human (launch, flap key, quit key, screen output).
 scenarios/<name>/
   prompt.md          # the task given to the model
   fixture/           # copied into the sandbox (reference + visible tests)
-  hidden/            # harness-owned grading suite — never shipped
+  hidden/            # harness-owned grading suite — withheld from this repo
 bench/
   run.py             # CLI: dispatch + grade
   dispatcher.py      # opencode (primary) / jcode (fallback) one-shot runner
@@ -31,9 +31,15 @@ bench/
   grader.py          # gates, deterministic score, report
   trace.py           # tool-call log parser (diagnostic)
   tests/             # canonical pytest suite
-scripts/             # smoke fixtures (known-good / broken) for grader tests
+scripts/             # smoke fixtures (known-good / broken) — withheld, private
 runs/<label>/        # sandbox, dispatch logs, report.md/json (gitignored)
 ```
+
+The hidden suite (exact-value + determinism assertions) and the smoke
+fixtures (reference implementations) are **withheld from this public
+repo** to preserve benchmark integrity — a model that could read them
+would know exactly what is graded. They live privately with the
+maintainer; grading a fresh run requires them.
 
 ## Prerequisites
 
@@ -52,7 +58,7 @@ runs/<label>/        # sandbox, dispatch logs, report.md/json (gitignored)
 
 ```bash
 cd dragonscale
-.venv/bin/python -m pytest          # canonical suite (16 tests)
+.venv/bin/python -m pytest          # canonical suite (35 tests; smoke fixtures required)
 
 # grade an existing directory (smoke / offline); --model stamps the report
 python3 bench/run.py --scenario flappy-build --label smoke-good \
@@ -60,15 +66,15 @@ python3 bench/run.py --scenario flappy-build --label smoke-good \
 
 # full run: dispatch opencode -> model, then grade
 python3 bench/run.py --scenario flappy-build --label run-oc-001 \
-    --runner opencode --provider UNOBTANIUM --model Qwen3.6-35B-... --timeout 3600
+    --runner opencode --provider MYPROVIDER --model my-model --timeout 3600
 
 # model as one string, custom workdir (created for the sandbox)
 python3 bench/run.py --scenario flappy-build --label run-ds-001 \
-    --runner opencode --model MEDIABRIDGE/main --workdir /tmp/ds-sandbox --timeout 3600
+    --runner opencode --model MYPROVIDER/my-model --workdir /tmp/ds-sandbox --timeout 3600
 
 # jcode fallback
 python3 bench/run.py --scenario flappy-build --label run-jc-001 \
-    --runner jcode --provider omlx-35b --timeout 3600
+    --runner jcode --provider my-provider --timeout 3600
 ```
 
 The runner env is sanitized (`HERMES_*` stripped, jcode gets `--no-selfdev`)
@@ -112,7 +118,7 @@ beats fast-wrong).
 ## First results (2026-08-07, flappy-build, seed 42)
 
 v1 rubric: DeepSeek v4-flash (284B MoE) 93.5 PASS; sprisa 27B 88.5 PASS;
-Laguna 118B 88.4 PASS; DS4 2-bit (local :7777) 85.0 PASS; Qwen 35B 73.6
+Laguna 118B 88.4 PASS; DS4 2-bit 85.0 PASS; Qwen 35B 73.6
 FAIL (no git); Qwen 122B 73.0 FAIL (no git, mutation 0).
 
 **v2 verdicts on the same artifacts** (hard gate on human-playability):
