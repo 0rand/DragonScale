@@ -136,14 +136,17 @@ def _human_play_smoke(sandbox: Path) -> dict:
     Sequence (with continuous output drain — a pty buffer fills and blocks
     the child's write if we don't read, so the child never reaches its input
     read; a real human terminal consumes output continuously):
-      1. launch, render must appear (screen output works)
-      2. send 'w' (flap) — the key loop must consume it and stay alive
-      3. send 'q' — clean quit, exit 0
+      0. idle progression: 1s with NO input — a live game must advance time
+         (bird falls, pipes move -> rendered frame changes). A game whose
+         loop only steps on keypress renders the SAME frame forever (frozen)
+         and is unplayable for a human.
+      1. send 'w' (flap) — the key loop must consume it and stay alive
+      2. send 'q' — clean quit, exit 0
     Plus a SMALL-TERMINAL (10 rows) pass whose raw output is scanned for
     frame overflow (frames taller than the terminal scroll and stack —
     the "3 parallel realities" bug). Curses games adapt; hardcoded-frame
-    games overflow. Proves: curses/keyboard init, a live key loop, a
-    working quit path, and that the screen fits the terminal.
+    games overflow. Proves: curses/keyboard init, a live key loop, time
+    progression, a working quit path, and that the screen fits the terminal.
     """
     import pty
     import select
@@ -168,6 +171,8 @@ def _human_play_smoke(sandbox: Path) -> dict:
     alive_after_flap = False
     drained = 0
     raw = b""
+    sig1 = sig2 = b""
+    idle_progressed = False
     while time.monotonic() - start < 15:
         r, _, _ = select.select([master], [], [], 0.1)
         if r:
@@ -178,13 +183,19 @@ def _human_play_smoke(sandbox: Path) -> dict:
             except OSError:
                 break
         t = time.monotonic() - start
-        if t > 1.5 and not sent_w:
+        # Idle-progression window: capture frame at 0.5s and 1.5s, NO input.
+        if t > 0.5 and not sig1:
+            sig1 = raw[-1200:]
+        if t > 1.5 and sig1 and not sig2:
+            sig2 = raw[-1200:]
+            idle_progressed = sig1 != sig2
+        if t > 1.8 and not sent_w:
             try:
                 os.write(master, b"w")
                 sent_w = True
             except OSError:
                 pass
-        if t > 3.0 and sent_w and not sent_q:
+        if t > 2.4 and sent_w and not sent_q:
             alive_after_flap = proc.poll() is None
             try:
                 os.write(master, b"q")
@@ -227,10 +238,11 @@ def _human_play_smoke(sandbox: Path) -> dict:
         overflow = -1  # check unavailable
 
     elapsed = int((time.monotonic() - start) * 1000)
-    return {"ok": rc == 0 and alive_after_flap and sent_q and overflow == 0,
+    return {"ok": rc == 0 and alive_after_flap and sent_q and overflow == 0 and idle_progressed,
             "exit": rc, "sent_w": sent_w, "alive_after_flap": alive_after_flap,
             "sent_q": sent_q, "drained_bytes": drained, "ms": elapsed,
-            "overflow_writes": overflow, "small_terminal_ok": overflow == 0}
+            "overflow_writes": overflow, "small_terminal_ok": overflow == 0,
+            "idle_progressed": idle_progressed, "sig1_len": len(sig1), "sig2_len": len(sig2)}
 
 
 def compute_score(report: dict) -> dict:
@@ -399,6 +411,8 @@ def render_markdown(report: dict) -> str:
               f"- flap key ('w'): sent={hp.get('sent_w')}, alive after flap="
               f"{hp.get('alive_after_flap')}",
               f"- quit key ('q'): sent={hp.get('sent_q')}",
+              f"- idle time progression: {hp.get('idle_progressed')} "
+              f"(frame {'changed' if hp.get('idle_progressed') else 'SAME'} with no input)",
               f"- small-terminal overflow: {hp.get('overflow_writes')} writes "
               f"(ok={hp.get('small_terminal_ok')})",
               ""]
