@@ -11,10 +11,13 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import termios
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -90,44 +93,119 @@ def solve_via_import(sandbox: Path, seed: int):
 # Weights sum to 100. Every component is computed from artifacts.
 # --------------------------------------------------------------------------
 
+# Fixed semantic mutant panel (Sol review 2026-08-07): each mutant is an
+# independent sabotage anchored on an exact constant the hidden suite asserts
+# (reference.md §4 values). One kill per mutant = the model's OWN tests catch
+# it. A mutant whose anchor is absent from the model's core is "n/a" and
+# excluded from the denominator. This replaces the old failed/total ratio,
+# which rewarded test parametrization and cascading failures.
+MUTANT_PANEL = [
+    {"name": "gravity",         "find": r"12\.0", "repl": "14.0"},
+    {"name": "flap_velocity",   "find": r"-10\.0", "repl": "-8.0"},
+    {"name": "collision_ceiling", "find": r"1\.5", "repl": "2.5"},
+    {"name": "rng_seed_mix",    "find": r"1009",  "repl": "1013"},
+]
+
+
 def _mutation_sensitivity(sandbox: Path, model_tests_path: Path) -> dict:
-    """Run the model's own tests against a MUTATED copy of its core.
+    """Run the model's own tests against a FIXED PANEL of core mutants.
 
-    Mutation: level-0 gravity 12.0 -> 14.0 (the smoke_broken sabotage).
-    Tests that fail under mutation have teeth; a suite that still passes
-    against sabotaged physics is vacuous. sensitivity = (failed+errors)/total.
+    Each mutant is applied to a clean copy of the sandbox; a mutant is
+    KILLED if the baseline suite passes and the mutant suite fails (>=1
+    failure/error). sensitivity = kills / applicable_mutants.
     """
-    import shutil
-    import tempfile
-
     if not model_tests_path.exists():
         return {"applicable": False, "reason": "no model tests",
-                "sensitivity": 0.0, "total": 0, "failed": 0}
-    tmp = Path(tempfile.mkdtemp(prefix="dragonscale-mut-"))
-    shutil.copytree(sandbox, tmp, dirs_exist_ok=True)
-    try:
-        core_p = tmp / "game" / "core.py"
-        if not core_p.exists():
-            return {"applicable": False, "reason": "no game/core.py",
-                    "sensitivity": 0.0, "total": 0, "failed": 0}
-        src = core_p.read_text()
-        # Sabotage: level-0 gravity 12.0 -> 14.0. Works for positional Level()
-        # tuples (flappsy), dict LEVELS, and dataclass forms — the value
-        # 12.0 must appear literally (hidden suite asserts it).
-        m = re.search(r"12\.0", src)
+                "kills": 0, "applicable_mutants": 0, "kills_by_mutant": {},
+                "sensitivity": 0.0}
+    core_p = sandbox / "game" / "core.py"
+    if not core_p.exists():
+        return {"applicable": False, "reason": "no game/core.py",
+                "kills": 0, "applicable_mutants": 0, "kills_by_mutant": {},
+                "sensitivity": 0.0}
+    # Baseline must be green or mutation is vacuous.
+    base = _pytest_result(sandbox, model_tests_path)
+    if base["failed"] or base["errors"] or base["passed"] == 0:
+        return {"applicable": False,
+                "reason": f"baseline tests not green ({base['passed']}p/{base['failed']}f/{base['errors']}e)",
+                "kills": 0, "applicable_mutants": 0, "kills_by_mutant": {},
+                "sensitivity": 0.0}
+
+    src = core_p.read_text()
+    kills = 0
+    applicable = 0
+    kills_by_mutant = {}
+    for mutant in MUTANT_PANEL:
+        m = re.search(mutant["find"], src)
         if not m:
-            return {"applicable": False, "reason": "12.0 not found",
-                    "sensitivity": 0.0, "total": 0, "failed": 0}
-        mutated = src[:m.start()] + "14.0" + src[m.end():]
-        core_p.write_text(mutated)
-        res = _pytest_result(tmp, tmp / "tests" / "test_game.py")
-        total = res["passed"] + res["failed"] + res["errors"]
-        failed = res["failed"] + res["errors"]
-        return {"applicable": True,
-                "sensitivity": round(failed / total, 4) if total else 0.0,
-                "total": total, "failed": failed}
+            kills_by_mutant[mutant["name"]] = "n/a"
+            continue
+        applicable += 1
+        tmp = Path(tempfile.mkdtemp(prefix="dragonscale-mut-"))
+        shutil.copytree(sandbox, tmp, dirs_exist_ok=True)
+        try:
+            mutated = src[:m.start()] + mutant["repl"] + src[m.end():]
+            (tmp / "game" / "core.py").write_text(mutated)
+            res = _pytest_result(tmp, tmp / "tests" / "test_game.py")
+            killed = res["failed"] + res["errors"] > 0
+            if killed:
+                kills += 1
+            kills_by_mutant[mutant["name"]] = "killed" if killed else "survived"
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    sensitivity = round(kills / applicable, 4) if applicable else 0.0
+    return {"applicable": True, "reason": "n/a",
+            "kills": kills, "applicable_mutants": applicable,
+            "kills_by_mutant": kills_by_mutant, "sensitivity": sensitivity}
+
+
+def _packaging_check(sandbox: Path) -> dict:
+    """Deliverable packaging (7 pts): pyproject valid + requires-python >= 3.11
+    + zero runtime deps, README present, package imports cleanly."""
+    detail = {}
+    score = 0.0
+    data = None
+    pyproject = sandbox / "pyproject.toml"
+    try:
+        with open(pyproject, "rb") as f:
+            data = tomllib.load(f)
+        req = (data.get("project", {}) or {}).get("requires-python", "")
+        detail["requires_python"] = req
+        if re.match(r">=\s*3\.1[1-9]", req or ""):
+            score += 2.0
+        else:
+            detail["requires_python_ok"] = False
+        deps = (data.get("project", {}) or {}).get("dependencies", []) or []
+        detail["deps"] = deps
+        if not deps:
+            score += 2.0
+    except FileNotFoundError:
+        detail["error"] = "no pyproject.toml"
+    except Exception as e:  # noqa: BLE001
+        detail["error"] = f"{type(e).__name__}: {e}"
+
+    readme = sandbox / "README.md"
+    detail["readme"] = readme.exists() and readme.stat().st_size > 0
+    if detail["readme"]:
+        score += 1.0
+
+    try:
+        sys.path.insert(0, str(sandbox))
+        import game.core  # noqa: F401
+        import game.controller  # noqa: F401
+        import game.render  # noqa: F401
+        detail["import"] = True
+        score += 2.0
+    except Exception as e:  # noqa: BLE001
+        detail["import"] = False
+        detail["import_error"] = f"{type(e).__name__}: {e}"
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        sys.path.pop(0)
+        for k in [k for k in list(sys.modules) if k == "game" or k.startswith("game.")]:
+            del sys.modules[k]
+
+    return {"score": round(score, 2), "detail": detail}
 
 
 def _human_play_smoke(sandbox: Path) -> dict:
@@ -303,12 +381,19 @@ def _human_play_smoke(sandbox: Path) -> dict:
 
 
 def compute_score(report: dict) -> dict:
-    """Deterministic 0-100 rubric from the graded report. No LLM."""
+    """Deterministic 0-100 rubric from the graded report. No LLM.
+
+    v2 weights (Sol review 2026-08-07): terminal usability is now 15pts and
+    a HARD gate; packaging/harness integration 7pts; mutation is a fixed
+    mutant panel (kills/applicable). hidden 25 / passability 12 / replay 8 /
+    contract 8 / own tests 5 / mutation 5 / git 15 / human play 15 /
+    packaging 7 = 100.
+    """
     c = {}
 
     hid = report["hidden_tests"]
     hid_total = hid.get("passed", 0) + hid.get("failed", 0) + hid.get("errors", 0)
-    c["hidden_suite"] = round(hid.get("passed", 0) / hid_total * 30, 2) if hid_total else 0.0
+    c["hidden_suite"] = round(hid.get("passed", 0) / hid_total * 25, 2) if hid_total else 0.0
 
     sol = report["solver"]
     if "import_error" in sol or "solver_error" in sol:
@@ -316,20 +401,20 @@ def compute_score(report: dict) -> dict:
     else:
         lvls = [sol[f"level_{i}"] for i in range(4) if f"level_{i}" in sol]
         n = max(len(lvls), 1)
-        c["passability"] = round(sum(1 for l in lvls if l.get("passable")) / n * 15, 2)
-        c["replay"] = round(sum(1 for l in lvls if l.get("replay_ok")) / n * 10, 2)
+        c["passability"] = round(sum(1 for l in lvls if l.get("passable")) / n * 12, 2)
+        c["replay"] = round(sum(1 for l in lvls if l.get("replay_ok")) / n * 8, 2)
 
     mt = report["model_tests"]
     if mt.get("missing"):
         c["own_tests"], c["mutation"] = 0.0, 0.0
     else:
         mt_total = mt.get("passed", 0) + mt.get("failed", 0) + mt.get("errors", 0)
-        c["own_tests"] = round(mt.get("passed", 0) / mt_total * 8, 2) if mt_total else 0.0
-        c["mutation"] = round(report.get("mutation", {}).get("sensitivity", 0.0) * 7, 2)
+        c["own_tests"] = round(mt.get("passed", 0) / mt_total * 5, 2) if mt_total else 0.0
+        c["mutation"] = round(report.get("mutation", {}).get("sensitivity", 0.0) * 5, 2)
 
     vis = report["visible_tests"]
     vis_total = vis.get("passed", 0) + vis.get("failed", 0) + vis.get("errors", 0)
-    c["contract"] = round(vis.get("passed", 0) / vis_total * 10, 2) if vis_total else 0.0
+    c["contract"] = round(vis.get("passed", 0) / vis_total * 8, 2) if vis_total else 0.0
 
     g = report["git"]
     if not g.get("init"):
@@ -348,7 +433,9 @@ def compute_score(report: dict) -> dict:
             2)
 
     hp = report.get("human_play", {})
-    c["human_play"] = 5.0 if hp.get("ok") else 0.0
+    c["human_play"] = 15.0 if hp.get("ok") else 0.0
+
+    c["packaging"] = round(report.get("packaging", {}).get("score", 0.0), 2)
 
     total = round(sum(c.values()), 2)
     return {"total": total, "components": c}
@@ -390,11 +477,14 @@ def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42,
 
     report["solver"] = solve_via_import(sandbox, seed)
 
-    # Mutation sensitivity: do the model's OWN tests catch a physics sabotage?
+    # Mutation: do the model's OWN tests catch the fixed mutant panel?
     report["mutation"] = _mutation_sensitivity(sandbox, sandbox / "tests" / "test_game.py")
 
     # Human-play smoke: can a human actually launch + quit the game?
     report["human_play"] = _human_play_smoke(sandbox)
+
+    # Packaging / harness integration: pyproject, README, clean import.
+    report["packaging"] = _packaging_check(sandbox)
 
     # Trace (only when a dispatch happened)
     dispatch_log = sandbox.parent / "dispatch.stdout.log"
@@ -429,6 +519,26 @@ def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42,
         reasons.append("no git repository")
     elif git.get("commits", 0) < 3:
         reasons.append(f"only {git.get('commits')} commits (< 3)")
+
+    # v2 hard gate (Sol review 2026-08-07): an unplayable terminal game must
+    # FAIL even with perfect physics. Human-play smoke covers launch, idle
+    # time progression, quit, small-terminal overflow, and the Ctrl+C trap.
+    hp = report.get("human_play", {})
+    if not hp.get("ok"):
+        if hp.get("error"):
+            reasons.append(f"game not human-playable (spawn failed: {hp.get('error')})")
+        else:
+            bits = []
+            if not hp.get("idle_progressed"):
+                bits.append("frozen (time only advances on keypress)")
+            if hp.get("overflow_writes"):
+                bits.append(f"small-terminal overflow ({hp.get('overflow_writes')} writes)")
+            if hp.get("ctrlc_isig") is False:
+                bits.append("Ctrl+C trap (raw mode, ISIG off)")
+            if hp.get("exit") != 0:
+                bits.append(f"no clean quit (exit {hp.get('exit')})")
+            reasons.append("game not human-playable: " + "; ".join(bits) if bits
+                           else "game not human-playable")
 
     report["verdict"] = {"result": "PASS" if not reasons else "FAIL", "reasons": reasons}
     return report
@@ -478,10 +588,18 @@ def render_markdown(report: dict) -> str:
               ""]
 
     mut = report.get("mutation", {})
-    lines += ["## Mutation sensitivity",
+    lines += ["## Mutation sensitivity (fixed panel)",
               f"- applicable: {mut.get('applicable')} ({mut.get('reason', 'n/a')})",
-              f"- sensitivity: {mut.get('sensitivity')} ({mut.get('failed')}/{mut.get('total')} "
-              f"own tests fail under gravity 12->14)",
+              f"- kills: {mut.get('kills')} / {mut.get('applicable_mutants')} "
+              f"applicable mutants",
+              f"- by mutant: {mut.get('kills_by_mutant')}",
+              f"- sensitivity: {mut.get('sensitivity')} (×5 pts)",
+              ""]
+
+    pkg = report.get("packaging", {})
+    lines += ["## Packaging / harness integration",
+              f"- score: {pkg.get('score')} / 7",
+              f"- detail: {pkg.get('detail')}",
               ""]
 
     for name in ("visible_tests", "model_tests", "hidden_tests"):

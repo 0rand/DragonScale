@@ -19,9 +19,9 @@ reference document, a contract test suite, and this task.
    state.
 4. `game/__main__.py` — human play mode: `python3 -m game` starts a
    keyboard session using the SAME controller. Space/W/Up = flap,
-   P = pause, R = restart, Q = quit. The loop advances time at TICK_RATE
-   even when no key is pressed (`step("NONE")` on idle), and renders to
-   the ACTUAL terminal size (see Requirements).
+   P = pause, R = restart, Q = quit. The loop must advance time at
+   TICK_RATE even when no key is pressed, and render to the actual
+   terminal size (see Requirements).
 5. `tests/test_game.py` — your own pytest test suite. It must pass and it
    must be meaningful (see reference.md §10.1).
 6. `pyproject.toml` — project metadata, `requires-python >= 3.11`,
@@ -74,18 +74,17 @@ Where the document is self-contradictory, the **Current Tuning** section
   actions (reference.md §4.6).
 - Levels must be actually completable: every level's pipe gaps must be
   geometrically reachable by a valid flap sequence.
-- **Terminal size is VARIABLE.** The game must render to the actual
-  terminal dimensions at runtime (e.g. curses, `os.get_terminal_size()`,
-  or `COLUMNS`/`LINES`), never to a hardcoded 80x24 frame. On any
-  terminal ≥ 50x18 the whole playfield must be visible with no frame
-  stacking, no scroll artifacts, and no clipped pipes. reference.md's
-  "80x24 by default" is a DEFAULT size, not a fixed one.
-- **Time advances continuously.** The play loop must advance the world at
-  TICK_RATE (`dt = 1/TICK_RATE`) on every tick, whether or not a key is
-  pressed — call `step("NONE")` on idle iterations. Key presses steer
-  (flap/pause/restart/quit); they must never be the sole driver of time.
-  Make this explicit in `play()` / `__main__.py` (e.g. a loop that steps
-  at TICK_RATE and reads input with a short timeout).
+- **Terminal size is variable.** The viewport must adapt to the actual
+  terminal dimensions at runtime; a hardcoded 80x24 frame is not
+  acceptable. On every terminal from 50x18 up, the whole playfield must
+  remain visible and usable with no frame stacking, no scroll artifacts,
+  and no clipped pipes. reference.md's "80x24 by default" is a DEFAULT
+  size, not a fixed one.
+- **Time advances continuously.** The world must advance at TICK_RATE
+  (`dt = 1/TICK_RATE`) on every tick, whether or not any key is pressed.
+  A game that only advances when the player presses a key is not
+  playable. Key presses steer (flap/pause/restart/quit); they must never
+  be the sole driver of time.
 - Verify your work like an engineer:
   1. Run `tests/test_contract.py` and your own `tests/test_game.py` —
      iterate until green.

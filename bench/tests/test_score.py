@@ -34,7 +34,7 @@ def test_score_is_deterministic():
 
 
 def test_score_hidden_proportional():
-    """hidden_suite = passed/total * 30."""
+    """hidden_suite = passed/total * 25 (v2 weight)."""
     rep = {
         "hidden_tests": {"passed": 6, "failed": 2, "errors": 0},
         "solver": {f"level_{i}": {"passable": True, "replay_ok": True}
@@ -45,9 +45,10 @@ def test_score_hidden_proportional():
         "git": {"init": True, "commits": 5, "dirty": [],
                 "messages": ["one", "two", "three", "four", "five"]},
         "human_play": {"ok": True},
+        "packaging": {"score": 7.0},
     }
     sc = compute_score(rep)
-    assert sc["components"]["hidden_suite"] == 22.5  # 6/8 * 30
+    assert sc["components"]["hidden_suite"] == 18.75  # 6/8 * 25
 
 
 def test_score_weights_sum_to_100_when_perfect():
@@ -62,9 +63,32 @@ def test_score_weights_sum_to_100_when_perfect():
                 "messages": ["scaffold the project", "core game logic",
                              "tests and tooling"]},
         "human_play": {"ok": True},
+        "packaging": {"score": 7.0},
     }
     sc = compute_score(rep)
     assert sc["total"] == 100.0, sc
+    assert sc["components"]["human_play"] == 15.0
+    assert sc["components"]["packaging"] == 7.0
+    assert sc["components"]["mutation"] == 5.0
+
+
+def test_score_mutation_is_fixed_panel():
+    """mutation = kills/applicable * 5; 2/4 kills -> 2.5."""
+    rep = {
+        "hidden_tests": {"passed": 8, "failed": 0, "errors": 0},
+        "solver": {f"level_{i}": {"passable": True, "replay_ok": True}
+                   for i in range(4)},
+        "model_tests": {"passed": 20, "failed": 0, "errors": 0},
+        "mutation": {"sensitivity": 0.5},
+        "visible_tests": {"passed": 13, "failed": 0, "errors": 0},
+        "git": {"init": True, "commits": 3, "dirty": [],
+                "messages": ["scaffold the project", "core game logic",
+                             "tests and tooling"]},
+        "human_play": {"ok": True},
+        "packaging": {"score": 7.0},
+    }
+    sc = compute_score(rep)
+    assert sc["components"]["mutation"] == 2.5
 
 
 def test_score_ranks_graded_artifacts():

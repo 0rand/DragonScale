@@ -77,39 +77,57 @@ so the bench model never inherits the parent agent's persona or history.
 ## Verdict + Score
 
 **Verdict** is a hard gate: PASS requires hidden suite green, level 0
-passable AND replayable, and git repo with >= 3 logical commits.
+passable AND replayable, git repo with >= 3 logical commits, **and a
+human-playable game** (launch, idle time progression, clean quit, no
+small-terminal overflow, Ctrl+C must not trap the terminal).
 
-**Score** is a deterministic 0-100 rubric computed purely from artifacts:
+**Score** is a deterministic 0-100 rubric computed purely from artifacts
+(v2 weights, 2026-08-07):
 
 | component | pts | source |
 |-----------|-----|--------|
-| hidden_suite | 30 | exact constants + determinism pass rate |
-| passability | 15 | fraction of 4 levels BFS-passable |
-| replay | 10 | fraction replay-verified |
-| own_tests | 8 | model's own test suite pass rate |
-| mutation | 7 | do the model's tests catch a gravity sabotage? |
-| contract | 10 | visible suite pass rate |
+| hidden_suite | 25 | exact constants + determinism pass rate |
+| passability | 12 | fraction of 4 levels BFS-passable |
+| replay | 8 | fraction replay-verified |
+| own_tests | 5 | model's own test suite pass rate |
+| mutation | 5 | fixed mutant panel: kills / applicable (gravity, flap, collision, seed-mix) |
+| contract | 8 | visible suite pass rate |
 | git | 15 | repo + >=3 commits + clean tree + meaningful messages |
-| human_play | 5 | PTY: launch, flap key, quit key, exit 0 |
+| human_play | 15 | PTY: launch, idle progression, flap, quit, overflow, Ctrl+C trap |
+| packaging | 7 | pyproject (requires-python >= 3.11, zero deps), README, clean import |
 
 Tool-call trace (calls, failures by tool, tokens) is a diagnostic column —
 never a score. Speed is not graded (1 AI second = 1 human hour; slow-correct
 beats fast-wrong).
 
-## First results (2026-08-06, flappy-build, seed 42)
+## Controls
 
-| run | model | verdict | score |
-|-----|-------|---------|-------|
-| run-oc-ds-001 | DeepSeek v4-flash (cloud) | PASS | 93.5 |
-| smoke-good | reference implementation | PASS | 93.0 |
-| run-oc-35b-001 | Qwen3.6-35B (local) | FAIL (no git) | 78.6 |
-| smoke-broken | unseeded RNG + gravity 14 | FAIL | 65.2 |
+- `smoke_good` (reference impl) — must PASS, deterministic score.
+- `smoke_broken` (unseeded RNG + gravity 14) — must FAIL; its score
+  wobbles between grades **by design** (unseeded RNG → layouts change).
+  Only the verdict is stable. Never use it as a score oracle.
+- `smoke_broken_seeded` (seeded RNG, still wrong physics) — must FAIL with
+  a **stable** score; this is the determinism oracle for the grader.
+
+## First results (2026-08-07, flappy-build, seed 42)
+
+v1 rubric: DeepSeek v4-flash (284B MoE) 93.5 PASS; sprisa 27B 88.5 PASS;
+Laguna 118B 88.4 PASS; DS4 2-bit (local :7777) 85.0 PASS; Qwen 35B 73.6
+FAIL (no git); Qwen 122B 73.0 FAIL (no git, mutation 0).
+
+**v2 verdicts on the same artifacts** (hard gate on human-playability):
+DeepSeek v4-flash 98.75 PASS (only fully playable game); smoke-good 95.0
+PASS; **all four local-family games now FAIL** — 27B 82.5, Laguna 82.5,
+DS4 77.0 (frozen loop + small-terminal overflow + Ctrl+C trap), 35B 68.75.
+The bench now says what a human feels: an unplayable terminal game is a
+FAIL even with perfect physics. v1-v2 scores are NOT comparable (rubric
+and gate changed); the report's prompt/rubric hashes separate them.
 
 Lesson: code quality and process discipline are orthogonal — the 35B built a
 flawless artifact (45 tests, exact constants) but never ran `git init`; the
-cloud model committed in a textbook sequence. Mutation sensitivity is a real
-discriminator: the reference build's own tests are value-shallow (0/4 catch
-the sabotage), DeepSeek's catch it (2/26).
+cloud model committed in a textbook sequence. Mutation panel is a real
+discriminator: reference build's own tests are value-shallow (0 kills),
+DeepSeek GA's catch some.
 
 ## Versioning discipline
 
