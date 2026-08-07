@@ -243,12 +243,63 @@ def _human_play_smoke(sandbox: Path) -> dict:
     except Exception as e:  # noqa: BLE001
         overflow = -1  # check unavailable
 
+    # Ctrl+C responsiveness: a game that puts the terminal in raw mode
+    # (ISIG off) TRAPS the human — Ctrl+C/Ctrl+Z are delivered as literal
+    # bytes and ignored; the game cannot be interrupted and the terminal is
+    # left broken. Check the pty's lflag directly (keep the slave fd open)
+    # AND require the process to exit within 3s of a 0x03 byte.
+    ctrlc_ok = False
+    ctrlc_rc = None
+    ctrlc_isig = False
+    try:
+        master3, slave3 = pty.openpty()
+        proc3 = subprocess.Popen(
+            [str(VENV_PY), "-m", "game"],
+            cwd=str(sandbox), stdin=slave3, stdout=slave3, stderr=slave3,
+            env=smoke_env, close_fds=True)
+        end3 = time.monotonic() + 0.6
+        while time.monotonic() < end3:
+            r3, _, _ = select.select([master3], [], [], 0.1)
+            if r3:
+                try:
+                    os.read(master3, 65536)
+                except OSError:
+                    break
+            time.sleep(0.02)
+        # Inspect the terminal the GAME is running in (slave side).
+        attrs = termios.tcgetattr(slave3)
+        ctrlc_isig = bool(attrs[3] & termios.ISIG)  # lflag index 3
+        try:
+            os.write(master3, b"\x03")
+        except OSError:
+            pass
+        end3 = time.monotonic() + 3.0
+        while time.monotonic() < end3 and proc3.poll() is None:
+            r3, _, _ = select.select([master3], [], [], 0.1)
+            if r3:
+                try:
+                    os.read(master3, 65536)
+                except OSError:
+                    break
+            time.sleep(0.05)
+        if proc3.poll() is None:
+            proc3.kill()
+            proc3.wait()
+        ctrlc_rc = proc3.poll()
+        ctrlc_ok = ctrlc_isig and ctrlc_rc is not None
+        os.close(slave3)
+        os.close(master3)
+    except Exception as e:  # noqa: BLE001
+        ctrlc_ok = False
+        ctrlc_rc = None  # check unavailable
+
     elapsed = int((time.monotonic() - start) * 1000)
-    return {"ok": rc == 0 and alive_after_flap and sent_q and overflow == 0 and idle_progressed,
+    return {"ok": rc == 0 and alive_after_flap and sent_q and overflow == 0 and idle_progressed and ctrlc_ok,
             "exit": rc, "sent_w": sent_w, "alive_after_flap": alive_after_flap,
             "sent_q": sent_q, "drained_bytes": drained, "ms": elapsed,
             "overflow_writes": overflow, "small_terminal_ok": overflow == 0,
-            "idle_progressed": idle_progressed, "sig1_len": len(sig1), "sig2_len": len(sig2)}
+            "idle_progressed": idle_progressed, "sig1_len": len(sig1), "sig2_len": len(sig2),
+            "ctrlc_ok": ctrlc_ok, "ctrlc_exit": ctrlc_rc, "ctrlc_isig": ctrlc_isig}
 
 
 def compute_score(report: dict) -> dict:
@@ -419,6 +470,9 @@ def render_markdown(report: dict) -> str:
               f"- quit key ('q'): sent={hp.get('sent_q')}",
               f"- idle time progression: {hp.get('idle_progressed')} "
               f"(frame {'changed' if hp.get('idle_progressed') else 'SAME'} with no input)",
+              f"- Ctrl+C responsiveness: {hp.get('ctrlc_ok')} "
+              f"(ISIG {'on' if hp.get('ctrlc_isig') else 'OFF=raw-mode trap'}, "
+              f"exit {hp.get('ctrlc_exit')})",
               f"- small-terminal overflow: {hp.get('overflow_writes')} writes "
               f"(ok={hp.get('small_terminal_ok')})",
               ""]
