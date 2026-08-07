@@ -208,6 +208,31 @@ def _packaging_check(sandbox: Path) -> dict:
     return {"score": round(score, 2), "detail": detail}
 
 
+# Bird glyphs across known renderers (reference 'B', DS GA/Laguna 'ᗧᗤ',
+# ASCII fallbacks '>','v'). Renderer-agnostic flap detection.
+_BIRD_GLYPHS = ("B", "\u15A7", "\u15A4", ">", "v")
+_BIRD_COL = 10  # BIRD_X in the reference contract
+
+
+def _bird_row_in_tail(tail: bytes) -> int | None:
+    """Row index of the bird in the last frame of a byte tail, or None.
+
+    Used for flap efficacy: compare the bird row before vs after sending
+    'w'. Unparseable tails return None (caller treats as unverifiable, not
+    a failure) so exotic renderers don't get false-FAILed.
+    """
+    text = tail.decode("utf-8", errors="replace")
+    for sep in ("\x1b[2J\x1b[H", "\x1b[H\x1b[J", "\x1b[2J", "\x1b[H\x1b[2J"):
+        if sep in text:
+            text = text.rsplit(sep, 1)[-1]
+    lines = text.splitlines()
+    for i, ln in enumerate(lines[2:-2]):  # skip header/ground lines
+        for col in (_BIRD_COL, _BIRD_COL - 1, _BIRD_COL + 1):
+            if len(ln) > col and ln[col] in _BIRD_GLYPHS:
+                return i + 2
+    return None
+
+
 def _human_play_smoke(sandbox: Path) -> dict:
     """Launch `python3 -m game` in a PTY, prove keyboard input + screen, quit.
 
@@ -371,13 +396,64 @@ def _human_play_smoke(sandbox: Path) -> dict:
         ctrlc_ok = False
         ctrlc_rc = None  # check unavailable
 
+    # Flap efficacy: in a FRESH launch (bird alive), send 'w' EARLY and
+    # verify the bird moves UP. The main launch's flap check only proves
+    # the process didn't crash — it can't see whether the bird moved, and
+    # by 1.8s the bird may already be dead (gravity 12-14 from center hits
+    # the ground at ~1.2-1.3s). Input-dead games (Laguna v2: per-read raw
+    # toggle leaves the tty in cooked mode, keys never delivered) fail
+    # here: the bird keeps falling, so post_flap row > pre_flap row.
+    flap_worked = None
+    try:
+        master4, slave4 = pty.openpty()
+        proc4 = subprocess.Popen(
+            [str(VENV_PY), "-m", "game"],
+            cwd=str(sandbox), stdin=slave4, stdout=slave4, stderr=slave4,
+            env=smoke_env, close_fds=True)
+        os.close(slave4)
+        out4 = b""
+        pre4 = post4 = b""
+        sent_w4 = False
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 2.0:
+            r4, _, _ = select.select([master4], [], [], 0.05)
+            if r4:
+                try:
+                    out4 += os.read(master4, 65536)
+                except OSError:
+                    break
+            t4 = time.monotonic() - t0
+            if t4 > 0.55 and not pre4:
+                pre4 = out4[-3000:]
+            if t4 > 0.65 and not sent_w4:
+                try:
+                    os.write(master4, b"w")
+                    sent_w4 = True
+                except OSError:
+                    pass
+            if t4 > 1.05 and sent_w4 and not post4:
+                post4 = out4[-3000:]
+        if proc4.poll() is None:
+            proc4.kill()
+            proc4.wait()
+        os.close(master4)
+        pre_row = _bird_row_in_tail(pre4)
+        post_row = _bird_row_in_tail(post4)
+        if pre_row is not None and post_row is not None:
+            flap_worked = post_row < pre_row  # bird moved UP after 'w'
+    except Exception:  # noqa: BLE001
+        flap_worked = None  # unverifiable — do not fail on parse/spawn miss
+
     elapsed = int((time.monotonic() - start) * 1000)
-    return {"ok": rc == 0 and alive_after_flap and sent_q and overflow == 0 and idle_progressed and ctrlc_ok,
+    return {"ok": rc == 0 and alive_after_flap and sent_q and overflow == 0
+                  and idle_progressed and ctrlc_ok
+                  and flap_worked is not False,
             "exit": rc, "sent_w": sent_w, "alive_after_flap": alive_after_flap,
             "sent_q": sent_q, "drained_bytes": drained, "ms": elapsed,
             "overflow_writes": overflow, "small_terminal_ok": overflow == 0,
             "idle_progressed": idle_progressed, "sig1_len": len(sig1), "sig2_len": len(sig2),
-            "ctrlc_ok": ctrlc_ok, "ctrlc_exit": ctrlc_rc, "ctrlc_isig": ctrlc_isig}
+            "ctrlc_ok": ctrlc_ok, "ctrlc_exit": ctrlc_rc, "ctrlc_isig": ctrlc_isig,
+            "flap_worked": flap_worked}
 
 
 def compute_score(report: dict) -> dict:
@@ -535,6 +611,8 @@ def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42,
                 bits.append(f"small-terminal overflow ({hp.get('overflow_writes')} writes)")
             if hp.get("ctrlc_isig") is False:
                 bits.append("Ctrl+C trap (raw mode, ISIG off)")
+            if hp.get("flap_worked") is False:
+                bits.append("flap key dead (bird did not move up on 'w')")
             if hp.get("exit") != 0:
                 bits.append(f"no clean quit (exit {hp.get('exit')})")
             reasons.append("game not human-playable: " + "; ".join(bits) if bits
@@ -577,6 +655,8 @@ def render_markdown(report: dict) -> str:
               f"{hp.get('ms')}ms)",
               f"- flap key ('w'): sent={hp.get('sent_w')}, alive after flap="
               f"{hp.get('alive_after_flap')}",
+              f"- flap efficacy: {hp.get('flap_worked')} "
+              f"(bird moved UP after 'w'; None = unverifiable render)",
               f"- quit key ('q'): sent={hp.get('sent_q')}",
               f"- idle time progression: {hp.get('idle_progressed')} "
               f"(frame {'changed' if hp.get('idle_progressed') else 'SAME'} with no input)",
