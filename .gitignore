@@ -6,3 +6,4 @@ __pycache__/
 scripts/smoke_good/
 scripts/smoke_broken/
 scripts/smoke_broken_seeded/
+scripts/smoke_stuck_lc/

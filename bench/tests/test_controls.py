@@ -41,6 +41,29 @@ def test_smoke_good_lc_probe_cached_module():
     assert hp1["ok"] and hp2["ok"]
 
 
+def test_smoke_stuck_lc_fails_progression():
+    """A game that freezes at LEVEL_COMPLETE but cannot advance on Enter
+    must FAIL the level-complete progression gate (35B v3 defect class).
+
+    Regression: the gate used a source-only binding scan
+    (_advance_binding_in), which dead code fools — the 35B v3 game
+    mapped Enter -> 'ENTER' and even called step('ENTER'), but step()
+    early-returned before the ENTER branch. Manual playtest found the
+    game stuck at level complete (only R/Q work). The gate now
+    exercises the Enter path behaviorally (_lc_progress_check) and must
+    catch this fixture, which passes everything else (hidden suite,
+    physics, git, overflow-free render)."""
+    r = _grade("pytest-stuck-lc", "scripts/smoke_stuck_lc")
+    assert r["result"] == "FAIL"
+    reasons = " ".join(r["reasons"])
+    assert "level-complete" in reasons, r["reasons"]
+    assert "Enter does not advance" in reasons, r["reasons"]
+    # The ONLY failure must be the progression gate — the fixture passes
+    # the hidden suite, physics, git, and is overflow-free.
+    assert "overflow" not in reasons, r["reasons"]
+    assert "hidden" not in reasons and "suite" not in reasons, r["reasons"]
+
+
 def test_bird_row_in_tail():
     """_bird_row_in_tail finds the bird glyph near column 10 in a frame."""
     from bench.grader import _bird_row_in_tail

@@ -280,9 +280,10 @@ def _advance_binding_in(sandbox: Path) -> str:
 
     Reference.md §2: Enter advances to the next level. Reports whether the
     sandbox's human-play code binds a key (Enter/newline, NEXT_LEVEL, or an
-    advance call) to progress past LEVEL_COMPLETE. Informational only —
-    the hard gate is the world-settles check. Values: 'enter-bind',
-    'next-level', 'advance-call', 'none', 'unreadable'.
+    advance call) to progress past LEVEL_COMPLETE. Informational — the hard
+    gate is behavioral (_lc_progress_check exercises the actual Enter path
+    in-process; source markers alone can be dead code). Values:
+    'enter-bind', 'next-level', 'advance-call', 'none', 'unreadable'.
     """
     try:
         hits = []
@@ -302,6 +303,116 @@ def _advance_binding_in(sandbox: Path) -> str:
         return "+".join(dict.fromkeys(hits))
     except Exception:  # noqa: BLE001
         return "unreadable"
+
+
+def _lc_progress_check(ctl) -> str:
+    """Behavioral: can the game progress past LEVEL_COMPLETE via Enter?
+
+    Source markers are NOT enough — a dead binding fools a source scan
+    (35B v3: ``_key_to_action`` maps Enter → 'ENTER', but ``step('ENTER')``
+    is unreachable dead code; the game froze "conforming" yet could never
+    advance — found by manual playtest). Exercise the game's own Enter
+    path in-process and require a real state change.
+
+    Ladder of conventions: ``advance()`` method (smoke_good / reference),
+    ``_map_key(stdscr, key)`` method (curses — DS GA), module-level
+    ``_key_to_action`` resolver (35B), module-level ``key_map`` dict,
+    then common ``step()`` action names. Returns 'advanced' | 'stuck'.
+    """
+    try:
+        _before = ctl.state()
+        _st_before = _before.get("status")
+        _lv_before = _before.get("level", 0)
+    except Exception:  # noqa: BLE001
+        return "stuck"
+
+    def _progressed() -> bool:
+        try:
+            _after = ctl.state()
+            return (_after.get("status") != _st_before
+                    or _after.get("level", 0) != _lv_before)
+        except Exception:  # noqa: BLE001
+            return False
+
+    # 1. controller.advance() method (smoke_good / reference convention)
+    try:
+        _adv = getattr(ctl, "advance", None)
+        if callable(_adv):
+            _adv()
+            if _progressed():
+                return "advanced"
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2. _map_key(stdscr, key) method (curses convention — DS GA)
+    try:
+        _mk = getattr(ctl, "_map_key", None)
+        if callable(_mk):
+            for _k in (10, 13, 343):
+                _mk(None, _k)
+                if _progressed():
+                    return "advanced"
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 3. module-level key resolver (35B convention)
+    try:
+        import game.controller as _cm  # noqa: PLC0415
+
+        _resolver = getattr(_cm, "_key_to_action", None)
+        if callable(_resolver):
+            for _k in ("\x0d", "\r", "\n", 10, 13, 343):
+                try:
+                    _act = _resolver(_k)
+                except Exception:  # noqa: BLE001
+                    continue
+                if _act and _act not in ("NONE", "QUIT", "RESTART",
+                                         "PAUSE", "FLAP"):
+                    ctl.step(_act)
+                    if _progressed():
+                        return "advanced"
+                    # Resolver produced an advance-ish action that did
+                    # nothing — the binding is dead (35B defect class).
+                    return "stuck"
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 4. module-level key map dict
+    try:
+        for _mod in (sys.modules.get("game.controller"),
+                     sys.modules.get("game.__main__")):
+            if _mod is None:
+                continue
+            for _attr in ("key_map", "KEY_MAP", "_key_map", "keys"):
+                _km = getattr(_mod, _attr, None)
+                if not isinstance(_km, dict):
+                    continue
+                for _k in (10, 13, 343, "\x0d", "\r", "\n"):
+                    if _k not in _km:
+                        continue
+                    _h = _km[_k]
+                    try:
+                        if callable(_h):
+                            _h(ctl)
+                        else:
+                            ctl.step(str(_h))
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if _progressed():
+                        return "advanced"
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 5. fallback step() conventions
+    for _act in ("ENTER", "NEXT_LEVEL", "ADVANCE", 10):
+        try:
+            ctl.step(_act)
+            if _progressed():
+                return "advanced"
+        except Exception:  # noqa: BLE001
+            continue
+
+    return "stuck"
 
 
 def _human_play_smoke(sandbox: Path) -> dict:
@@ -595,12 +706,24 @@ def _human_play_smoke(sandbox: Path) -> dict:
                                  "(never settles; step() must not advance a "
                                  "non-RUNNING world per reference.md)")
                 else:
-                    # Freezes at completion (conforming). Loop-level advance
-                    # affordance (Enter) reported as info, not gated here.
-                    _adv_binding = _advance_binding_in(sandbox)
-                    lc_advances, lc_how = True, "freeze"
-                    lc_detail = ("freezes at LEVEL_COMPLETE (conforming); "
-                                 f"loop advance binding: {_adv_binding}")
+                    # Freezes at completion (conforming settle). Now
+                    # verify the game can PROGRESS past it — Enter must
+                    # advance to the next level (reference.md §2). Source
+                    # markers alone are not enough: a dead binding fools
+                    # _advance_binding_in (35B v3 froze "conforming" but
+                    # its Enter handler was unreachable dead code — found
+                    # by manual playtest, 2026-08-07).
+                    _prog = _lc_progress_check(_ctl)
+                    if _prog == "advanced":
+                        lc_advances, lc_how = True, "freeze"
+                        lc_detail = ("freezes at LEVEL_COMPLETE (conforming); "
+                                     "Enter advances (behavioral)")
+                    else:
+                        _adv_binding = _advance_binding_in(sandbox)
+                        lc_advances, lc_how = False, None
+                        lc_detail = ("freezes at LEVEL_COMPLETE but Enter does "
+                                     "not advance (game cannot progress; "
+                                     f"source markers: {_adv_binding})")
                 break
             except Exception:  # noqa: BLE001
                 continue
