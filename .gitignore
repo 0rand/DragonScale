@@ -1,5 +1,4 @@
 runs/
-scenarios/*/hidden/
 .venv/
 __pycache__/
 *.pyc

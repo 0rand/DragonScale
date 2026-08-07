@@ -10,12 +10,22 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from bench.grader import compute_score
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 VENV_PY = ROOT / ".venv" / "bin" / "python"
+
+# Smoke fixtures are reference implementations, withheld from the public
+# repo — control/ranking tests skip when absent (grading a model needs
+# only the hidden suite, which IS public).
+SMOKE_FIXTURES = (ROOT / "scripts" / "smoke_good").is_dir()
+smoke = pytest.mark.skipif(
+    not SMOKE_FIXTURES,
+    reason="private smoke fixtures not present in this checkout")
 
 
 def _grade(label, prebuilt):
@@ -26,6 +36,7 @@ def _grade(label, prebuilt):
     return json.loads((ROOT / "runs" / label / "report.json").read_text())
 
 
+@smoke
 def test_score_is_deterministic():
     a = _grade("score-det-a", "scripts/smoke_good")
     b = _grade("score-det-b", "scripts/smoke_good")
@@ -91,6 +102,7 @@ def test_score_mutation_is_fixed_panel():
     assert sc["components"]["mutation"] == 2.5
 
 
+@smoke
 def test_score_ranks_graded_artifacts():
     """The four graded artifacts must rank: DS >= smoke-good > 35B > smoke-broken."""
     good = _grade("score-rank-good", "scripts/smoke_good")
@@ -99,6 +111,7 @@ def test_score_ranks_graded_artifacts():
     assert t[0] < t[1], f"broken={t[0]} good={t[1]}"
 
 
+@smoke
 def test_report_stamps_model_via_cli():
     """--model must land in report.json and report.md."""
     label = "score-model-cli"
@@ -130,6 +143,7 @@ def test_report_model_unknown_without_model():
     assert rep["verdict"]["result"] == "PASS"  # model stamping never affects verdict
 
 
+@smoke
 def test_prebuilt_grade_recovers_model_from_dispatch_json(tmp_path):
     """Re-grading a dispatched run's label recovers the model from dispatch.json."""
     label = "score-model-dispatch"

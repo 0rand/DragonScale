@@ -9,8 +9,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 VENV_PY = ROOT / ".venv" / "bin" / "python"
+
+# The smoke fixtures are reference implementations, withheld from the
+# public repo (benchmark integrity). On a fresh clone they are absent —
+# the control tests skip; grading a model does not need them.
+SMOKE_FIXTURES = (ROOT / "scripts" / "smoke_good").is_dir()
+smoke = pytest.mark.skipif(
+    not SMOKE_FIXTURES,
+    reason="private smoke fixtures not present in this checkout")
 
 
 def _grade(label, prebuilt):
@@ -21,14 +31,17 @@ def _grade(label, prebuilt):
     return json.loads(r.stdout)
 
 
+@smoke
 def test_smoke_good_passes():
     assert _grade("pytest-good", "scripts/smoke_good")["result"] == "PASS"
 
 
+@smoke
 def test_smoke_broken_fails():
     assert _grade("pytest-broken", "scripts/smoke_broken")["result"] == "FAIL"
 
 
+@smoke
 def test_smoke_good_lc_probe_cached_module():
     """Regression: the level-complete probe must not reuse a cached
     'game' module from a previous sandbox (same-process trap). Running
@@ -41,6 +54,7 @@ def test_smoke_good_lc_probe_cached_module():
     assert hp1["ok"] and hp2["ok"]
 
 
+@smoke
 def test_smoke_stuck_lc_fails_progression():
     """A game that freezes at LEVEL_COMPLETE but cannot advance on Enter
     must FAIL the level-complete progression gate (35B v3 defect class).
@@ -132,6 +146,7 @@ def test_report_kind_rendering():
     assert "### Defect profile" not in md2
 
 
+@smoke
 def test_smoke_broken_seeded_fails_stably():
     """Seeded physics-wrong control: FAIL (hidden suite) with STABLE score.
 

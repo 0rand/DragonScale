@@ -23,7 +23,7 @@ by a human (launch, flap key, quit key, screen output).
 scenarios/<name>/
   prompt.md          # the task given to the model
   fixture/           # copied into the sandbox (reference + visible tests)
-  hidden/            # harness-owned grading suite — withheld from this repo
+  hidden/            # harness-owned grading suite (exact-value + determinism)
 bench/
   run.py             # CLI: dispatch + grade
   dispatcher.py      # opencode (primary) / jcode (fallback) one-shot runner
@@ -35,11 +35,16 @@ scripts/             # smoke fixtures (known-good / broken) — withheld, privat
 runs/<label>/        # sandbox, dispatch logs, report.md/json (gitignored)
 ```
 
-The hidden suite (exact-value + determinism assertions) and the smoke
-fixtures (reference implementations) are **withheld from this public
-repo** to preserve benchmark integrity — a model that could read them
-would know exactly what is graded. They live privately with the
-maintainer; grading a fresh run requires them.
+The hidden suite is **public** — the exact values it asserts live in the
+public `reference.md` the model is given as its spec, so publishing the
+assertions costs no integrity. What stays private are the **smoke
+fixtures** (`scripts/`): reference implementations a model could copy to
+score perfectly. They are used only by the grader's own control tests
+(which skip when absent); grading a new model does not need them.
+
+**Grading a new model works out of the box:**
+`git clone` → configure a runner → `bench/run.py --scenario flappy-build
+--runner opencode --model YOURPROVIDER/model --timeout 3600`.
 
 ## Prerequisites
 
