@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "dragonscale"
 version = "0.1.0"
@@ -7,6 +11,11 @@ requires-python = ">=3.11"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+
+# Only bench/ is a real package (runs/, scenarios/ are data dirs — flat
+# auto-discovery refuses to build when it sees them).
+[tool.setuptools.packages.find]
+include = ["bench*"]
 
 [tool.pytest.ini_options]
 testpaths = ["bench/tests"]

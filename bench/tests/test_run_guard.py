@@ -11,8 +11,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 VENV_PY = ROOT / ".venv" / "bin" / "python"
+
+# Smoke fixtures are reference implementations, withheld from the public
+# repo — tests that grade them skip when absent (grading a model needs
+# only the hidden suite, which IS public).
+SMOKE_FIXTURES = (ROOT / "scripts" / "smoke_good").is_dir()
+smoke = pytest.mark.skipif(
+    not SMOKE_FIXTURES,
+    reason="private smoke fixtures not present in this checkout")
 
 
 def _run(label, prebuilt, extra=None):
@@ -43,6 +53,7 @@ def test_guard_refuses_self_prebuilt():
     assert before == after, "sandbox was deleted by the guard path"
 
 
+@smoke
 def test_legit_prebuilt_still_grades():
     """A real grade with a fresh label still works (smoke-good → PASS)."""
     r = _run("verify-guard", "scripts/smoke_good")
@@ -50,6 +61,7 @@ def test_legit_prebuilt_still_grades():
     assert json.loads(r.stdout)["result"] == "PASS"
 
 
+@smoke
 def test_workdir_creates_sandbox_at_requested_path(tmp_path):
     """--workdir must create the sandbox there, not under runs/<label>/."""
     target = tmp_path / "sandbox-here"

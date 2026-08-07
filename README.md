@@ -48,8 +48,11 @@ score perfectly. They are used only by the grader's own control tests
 
 ## Prerequisites
 
-- Python 3.11+ (stdlib only at runtime — zero runtime dependencies)
-- `pytest` (dev only) — `pip install pytest` or `pip install -e .[dev]`
+- **Python 3.11+** (stdlib only at runtime — zero runtime dependencies).
+  On macOS the system `python3` is 3.9 — use a Homebrew Python
+  (`brew install python@3.14`; the harness calls `.venv/bin/python`,
+  so create the venv with a 3.11+ interpreter).
+- `pytest` (dev only) — `python3.14 -m venv .venv && .venv/bin/pip install -e .[dev]`
 - A coding-agent runner, **installed and configured by you** (the bench does
   not install or configure runners):
   - **opencode** (primary): `npm i -g opencode-ai` — https://opencode.ai/docs

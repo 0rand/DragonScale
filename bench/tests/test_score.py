@@ -128,6 +128,7 @@ def test_report_stamps_model_via_cli():
     assert "Model under test" in md
 
 
+@smoke
 def test_report_model_unknown_without_model():
     """No model info -> report says unknown, verdict unaffected."""
     label = "score-model-none"
