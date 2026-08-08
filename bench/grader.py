@@ -305,7 +305,47 @@ def _advance_binding_in(sandbox: Path) -> str:
         return "unreadable"
 
 
-def _lc_progress_check(ctl) -> str:
+def _play_loop_advance_in(sandbox: Path) -> bool:
+    """Source check for a LIVE Enter->advance binding in the keyboard loop.
+
+    The behavioral ladder in _lc_progress_check drives the controller API,
+    which cannot reach play()/_play_loop() code that blocks on stdin
+    (select/read/getch). That produced false negatives: luna v4 advances on
+    Enter inside play() (reset(level+1)); ds4f v4 advances via
+    _ADVANCE_KEYS={\"\\r\",\"\\n\"} inside _play_loop(). Both play perfectly.
+
+    This rung ONLY fires after the behavioral rungs fail, and only when the
+    binding is DIRECT: an advance call (reset/advance_level/next_level/WON)
+    within 8 lines of BOTH an Enter key and a LEVEL_COMPLETE/WON check.
+    A dead flag (35B v3: _next_level_requested = True, consumed nowhere)
+    does NOT match — the flag is not an advance call.
+    """
+    import re
+
+    for fname in ("controller.py", "__main__.py"):
+        p = sandbox / "game" / fname
+        if not p.exists():
+            continue
+        src = p.read_text(errors="replace")
+        # An advance-keys set that includes Enter/newline (ds4f pattern).
+        adv_keys = re.search(
+            r"_ADVANCE_KEYS\s*=\s*frozenset\(\s*\{[^}]*\\[rn]", src)
+        lines = src.splitlines()
+        for i, ln in enumerate(lines):
+            if not re.search(r"reset\(|advance_level\(|next_level|"
+                             r"status\s*=\s*[\"']WON", ln):
+                continue
+            win = "\n".join(lines[max(0, i - 8):i + 9])
+            has_key = bool(re.search(
+                r'["\']\\[rn]["\']|KEY_ENTER|343|\b10,\s*13\b', win)) \
+                or (adv_keys and "_ADVANCE_KEYS" in win)
+            has_lc = bool(re.search(r"LEVEL_COMPLETE|\bWON\b", win))
+            if has_key and has_lc:
+                return True
+    return False
+
+
+def _lc_progress_check(ctl, sandbox: Path) -> str:
     """Behavioral: can the game progress past LEVEL_COMPLETE via Enter?
 
     Source markers are NOT enough — a dead binding fools a source scan
@@ -411,6 +451,16 @@ def _lc_progress_check(ctl) -> str:
                 return "advanced"
         except Exception:  # noqa: BLE001
             continue
+
+    # 6. play-loop source rung — the keyboard loop blocks on stdin, so
+    #    the API ladder above cannot reach it (luna/ds4f v4). Only a
+    #    DIRECT advance binding (an advance call beside an Enter key and
+    #    a LEVEL_COMPLETE check) counts — dead flags (35B) do not.
+    try:
+        if _play_loop_advance_in(sandbox):
+            return "advanced-playloop"
+    except Exception:  # noqa: BLE001
+        pass
 
     return "stuck"
 
@@ -686,7 +736,13 @@ def _human_play_smoke(sandbox: Path) -> dict:
                     lc_detail = "game ends with WON"
                     break
                 # LEVEL_COMPLETE reached — does the world settle?
-                _snap = (_st["tick"], _st["score"],
+                # Compare the VISIBLE world (score, bird, pipes). tick is
+                # NOT compared: some games advance an internal clock while
+                # the screen is frozen (ds4f v4: tick 227->348 over 120
+                # steps, score/bird/pipes FROZEN — 'totally good game' per
+                # playtest; the 27B hailstorm was VISIBLE chaos: score
+                # climbing + fireworks reshuffling, still caught here).
+                _snap = (_st["score"],
                          round(_st["bird"]["y"], 3),
                          tuple(round(p["x"], 1) for p in _st["pipes"]))
                 _settled = True
@@ -698,7 +754,7 @@ def _human_play_smoke(sandbox: Path) -> dict:
                         lc_detail = f"auto-advanced ({_s2})"
                         _settled = False
                         break
-                    _snap2 = (_st2["tick"], _st2["score"],
+                    _snap2 = (_st2["score"],
                               round(_st2["bird"]["y"], 3),
                               tuple(round(p["x"], 1) for p in _st2["pipes"]))
                     if _snap2 != _snap:
@@ -719,11 +775,15 @@ def _human_play_smoke(sandbox: Path) -> dict:
                     # _advance_binding_in (35B v3 froze "conforming" but
                     # its Enter handler was unreachable dead code — found
                     # by manual playtest, 2026-08-07).
-                    _prog = _lc_progress_check(_ctl)
+                    _prog = _lc_progress_check(_ctl, sandbox)
                     if _prog == "advanced":
                         lc_advances, lc_how = True, "freeze"
                         lc_detail = ("freezes at LEVEL_COMPLETE (conforming); "
                                      "Enter advances (behavioral)")
+                    elif _prog == "advanced-playloop":
+                        lc_advances, lc_how = True, "freeze"
+                        lc_detail = ("freezes at LEVEL_COMPLETE (conforming); "
+                                     "Enter advances (play-loop binding)")
                     else:
                         _adv_binding = _advance_binding_in(sandbox)
                         lc_advances, lc_how = False, None
