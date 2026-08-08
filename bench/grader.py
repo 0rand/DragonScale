@@ -814,11 +814,13 @@ def _human_play_smoke(sandbox: Path) -> dict:
 def compute_score(report: dict) -> dict:
     """Deterministic 0-100 rubric from the graded report. No LLM.
 
-    v2 weights (Sol review 2026-08-07): terminal usability is now 15pts and
-    a HARD gate; packaging/harness integration 7pts; mutation is a fixed
-    mutant panel (kills/applicable). hidden 25 / passability 12 / replay 8 /
-    contract 8 / own tests 5 / mutation 5 / git 15 / human play 15 /
-    packaging 7 = 100.
+    v3 weights (Primo rebalance 2026-08-08): human playability is by far
+    the most important thing — a game you can actually play and finish.
+    Git discipline matters but is secondary process (luna v4: best
+    playable game of the series, completed all levels, ranked BELOW the
+    unplayable 27B because git outweighed playability — backwards).
+    hidden 25 / passability 12 / replay 8 / contract 8 / own tests 5 /
+    mutation 5 / git 5 / human play 30 / packaging 2 = 100.
     """
     c = {}
 
@@ -857,16 +859,16 @@ def compute_score(report: dict) -> dict:
                       if len(m.strip()) < 8 or m.strip().lower() in ("wip", "init", "update", "commit"))
         nontriv_ratio = 1.0 if not msgs else (len(msgs) - min(trivial, len(msgs))) / len(msgs)
         c["git"] = round(
-            3.0                                # repo initialized
-            + 6.0 * min(commits, 3) / 3        # >= 3 logical commits
-            + (3.0 if not g.get("dirty") else 0.0)   # clean working tree
-            + (3.0 if nontriv_ratio >= 0.5 else 0.0),  # meaningful messages
+            1.0                                # repo initialized
+            + 2.0 * min(commits, 3) / 3        # >= 3 logical commits
+            + (1.0 if not g.get("dirty") else 0.0)   # clean working tree
+            + (1.0 if nontriv_ratio >= 0.5 else 0.0),  # meaningful messages
             2)
 
     hp = report.get("human_play", {})
-    c["human_play"] = 15.0 if hp.get("ok") else 0.0
+    c["human_play"] = 30.0 if hp.get("ok") else 0.0
 
-    c["packaging"] = round(report.get("packaging", {}).get("score", 0.0), 2)
+    c["packaging"] = round(report.get("packaging", {}).get("score", 0.0) / 7 * 2, 2)
 
     total = round(sum(c.values()), 2)
     return {"total": total, "components": c}

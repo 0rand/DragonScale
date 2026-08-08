@@ -100,19 +100,20 @@ human-playable game** (launch, idle time progression, clean quit, no
 small-terminal overflow, Ctrl+C must not trap the terminal).
 
 **Score** is a deterministic 0-100 rubric computed purely from artifacts
-(v2 weights, 2026-08-07):
+(v3 weights, 2026-08-08 — human playability is by far the most
+important thing; git is secondary process):
 
 | component | pts | source |
 |-----------|-----|--------|
+| human_play | **30** | PTY: launch, idle progression, flap, quit, overflow, Ctrl+C trap, level-complete progression |
 | hidden_suite | 25 | exact constants + determinism pass rate |
 | passability | 12 | fraction of 4 levels BFS-passable |
 | replay | 8 | fraction replay-verified |
 | own_tests | 5 | model's own test suite pass rate |
 | mutation | 5 | fixed mutant panel: kills / applicable (gravity, flap, collision, seed-mix) |
 | contract | 8 | visible suite pass rate |
-| git | 15 | repo + >=3 commits + clean tree + meaningful messages |
-| human_play | 15 | PTY: launch, idle progression, flap, quit, overflow, Ctrl+C trap |
-| packaging | 7 | pyproject (requires-python >= 3.11, zero deps), README, clean import |
+| git | **5** | repo + >=3 commits + clean tree + meaningful messages |
+| packaging | **2** | pyproject (requires-python >= 3.11, zero deps), README, clean import |
 
 Tool-call trace (calls, failures by tool, tokens) is a diagnostic column —
 never a score. Speed is not graded (1 AI second = 1 human hour; slow-correct

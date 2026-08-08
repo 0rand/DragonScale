@@ -46,7 +46,7 @@ def test_score_is_deterministic():
 
 
 def test_score_hidden_proportional():
-    """hidden_suite = passed/total * 25 (v2 weight)."""
+    """hidden_suite = passed/total * 25 (v3 weight)."""
     rep = {
         "hidden_tests": {"passed": 6, "failed": 2, "errors": 0},
         "solver": {f"level_{i}": {"passable": True, "replay_ok": True}
@@ -79,8 +79,8 @@ def test_score_weights_sum_to_100_when_perfect():
     }
     sc = compute_score(rep)
     assert sc["total"] == 100.0, sc
-    assert sc["components"]["human_play"] == 15.0
-    assert sc["components"]["packaging"] == 7.0
+    assert sc["components"]["human_play"] == 30.0
+    assert sc["components"]["packaging"] == 2.0
     assert sc["components"]["mutation"] == 5.0
 
 
