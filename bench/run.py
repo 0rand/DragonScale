@@ -124,8 +124,18 @@ def main():
     (runs / "report.json").write_text(json.dumps(report, indent=2))
     (runs / "report.md").write_text(render_markdown(report))
 
-    print(json.dumps(report["verdict"], indent=2))
-    print(f"score: {report.get('score', {}).get('total')} / 100", file=sys.stderr)
+    if kind == "control":
+        # Controls (smoke fixtures): the verdict is the load-bearing
+        # grader self-check — emit it (tests parse this JSON).
+        print(json.dumps(report["verdict"], indent=2))
+    else:
+        # Model runs: capability measurement — lead with the score and
+        # the defect profile, NOT a PASS/FAIL verdict (the verdict still
+        # lives in report.json for the machine interface).
+        print(json.dumps({
+            "score": report.get("score", {}).get("total"),
+            "defects": report["verdict"]["reasons"],
+        }, indent=2))
     print(f"report: {runs / 'report.md'}", file=sys.stderr)
 
 
