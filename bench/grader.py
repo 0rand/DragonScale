@@ -874,14 +874,31 @@ def compute_score(report: dict) -> dict:
     return {"total": total, "components": c}
 
 
+def _verdict_from_reasons(reasons: list, kind: str) -> tuple[str, list]:
+    """Split the defect list into gate vs scored-only.
+
+    v3 (Primo 2026-08-08): for MODEL runs the ONLY gate is playability —
+    a playable, completable game PASSes even with no git; hidden/solver/
+    git defects reduce the SCORE but never fail. Controls (smoke fixtures)
+    keep the full hard gate — that is the grader self-validation
+    (smoke_broken must FAIL regardless of playability).
+    Returns (result, gate_reasons).
+    """
+    if kind == "control":
+        gate = list(reasons)
+    else:
+        gate = [r for r in reasons if r.startswith("game not human-playable")]
+    return ("PASS" if not gate else "FAIL"), gate
+
+
 def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42,
           model: str | None = None, kind: str = "model"):
     """Grade a sandbox. ``kind``: 'model' (capability measurement — the
-    report leads with score + defect profile, no aggregate verdict) or
-    'control' (grader self-validation — smoke fixtures keep the
-    PASS/FAIL verdict headline). The verdict is ALWAYS in the JSON
-    (machine interface, regression tests); only the markdown framing
-    differs."""
+    report leads with score + defect profile; verdict = playability gate
+    only) or 'control' (grader self-validation — smoke fixtures keep the
+    full hard-gate PASS/FAIL verdict headline). The verdict is ALWAYS in
+    the JSON (machine interface, regression tests); only the markdown
+    framing differs."""
     ts = datetime.now(timezone.utc).isoformat()
     report = {
         "label": label, "model": model, "timestamp": ts, "seed": seed,
@@ -985,7 +1002,8 @@ def grade(sandbox: Path, scenario: Path, label: str, seed: int = 42,
             reasons.append("game not human-playable: " + "; ".join(bits) if bits
                            else "game not human-playable")
 
-    report["verdict"] = {"result": "PASS" if not reasons else "FAIL", "reasons": reasons}
+    report["verdict"] = {"result": _verdict_from_reasons(reasons, kind)[0],
+                         "reasons": reasons}
     return report
 
 

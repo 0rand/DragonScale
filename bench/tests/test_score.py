@@ -45,6 +45,26 @@ def test_score_is_deterministic():
     assert a["score"]["components"] == b["score"]["components"]
 
 
+def test_verdict_model_playability_only():
+    """v3: model verdict = playability gate only; everything else scores."""
+    from bench.grader import _verdict_from_reasons
+    # Playable but no git -> PASS for a model (git is scored, not gated).
+    res, gate = _verdict_from_reasons(["no git repository"], "model")
+    assert res == "PASS" and gate == []
+    # Playable but hidden-suite failure -> still PASS (score carries it).
+    res, _ = _verdict_from_reasons(["hidden suite not green (passed=4, failed=4, errors=0)"], "model")
+    assert res == "PASS"
+    # Unplayable -> FAIL regardless of git.
+    res, gate = _verdict_from_reasons(
+        ["no git repository",
+         "game not human-playable: frozen (time only advances on keypress)"],
+        "model")
+    assert res == "FAIL" and len(gate) == 1
+    # Control: full hard gate — any defect fails.
+    res, _ = _verdict_from_reasons(["no git repository"], "control")
+    assert res == "FAIL"
+
+
 def test_score_hidden_proportional():
     """hidden_suite = passed/total * 25 (v3 weight)."""
     rep = {

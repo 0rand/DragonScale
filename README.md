@@ -94,10 +94,14 @@ so the bench model never inherits the parent agent's persona or history.
 
 ## Verdict + Score
 
-**Verdict** is a hard gate: PASS requires hidden suite green, level 0
-passable AND replayable, git repo with >= 3 logical commits, **and a
-human-playable game** (launch, idle time progression, clean quit, no
-small-terminal overflow, Ctrl+C must not trap the terminal).
+**Verdict** (v3, 2026-08-08): for **model runs** PASS/FAIL is a
+**playability-only gate** — a game you can launch, play, complete levels
+in, and quit cleanly PASSes, even with no git or a rough hidden suite.
+Everything else (hidden constants, solver, git, packaging) reduces the
+**score** but never fails. For **controls** (smoke fixtures) the verdict
+keeps the full hard gate (hidden suite green, level 0 passable +
+replayable, git >= 3 commits, human-playable) — that is the grader
+self-validation; the report still leads with the score.
 
 **Score** is a deterministic 0-100 rubric computed purely from artifacts
 (v3 weights, 2026-08-08 — human playability is by far the most
