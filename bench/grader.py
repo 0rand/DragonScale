@@ -72,20 +72,28 @@ def solve_via_import(sandbox: Path, seed: int):
 
     sys.path.insert(0, str(sandbox))
     try:
-        import game.core as core
-        from game.controller import GameController
-    except Exception as e:  # noqa: BLE001
-        return {"import_error": f"{type(e).__name__}: {e}"}
+        try:
+            import game.core as core
+            from game.controller import GameController
+        except Exception as e:  # noqa: BLE001
+            return {"import_error": f"{type(e).__name__}: {e}"}
+
+        # Keep the sandbox on sys.path (and game.* in sys.modules) for the
+        # WHOLE solve. A model's controller may lazily `from game.core import
+        # X` inside reset()/step() (35B v4: _get_level at controller.py:207).
+        # The purge below exists to prevent cross-sandbox contamination and
+        # must run AFTER the solve — running it before would make that lazy
+        # import fail with ModuleNotFoundError and grade a perfect game as
+        # 'solver could not load the game'.
+        try:
+            factory = GameController
+            return solver.solve_all(core, factory, seed=seed)
+        except Exception as e:  # noqa: BLE001
+            return {"solver_error": f"{type(e).__name__}: {e}"}
     finally:
         sys.path.pop(0)
         for k in [k for k in list(sys.modules) if k == "game" or k.startswith("game.")]:
             del sys.modules[k]
-
-    try:
-        factory = GameController
-        return solver.solve_all(core, factory, seed=seed)
-    except Exception as e:  # noqa: BLE001
-        return {"solver_error": f"{type(e).__name__}: {e}"}
 
 
 # --------------------------------------------------------------------------
@@ -341,6 +349,43 @@ def _play_loop_advance_in(sandbox: Path) -> bool:
                 or (adv_keys and "_ADVANCE_KEYS" in win)
             has_lc = bool(re.search(r"LEVEL_COMPLETE|\bWON\b", win))
             if has_key and has_lc:
+                return True
+    return False
+
+
+def _play_loop_settles_in(sandbox: Path) -> bool:
+    """Source check: does the play loop gate physics on RUNNING?
+
+    The settle probe drives step() directly. A game whose step() advances
+    physics unconditionally (35B v4: physics_step called with no status
+    guard) but whose PLAY LOOP only steps while RUNNING freezes correctly
+    for a human — the LEVEL_COMPLETE overlay holds, Enter advances.
+    Flagging it "never settles" is the same false-positive class as the
+    ds4f tick artifact. This rung fires only when the play loop's physics
+    advance is guarded by a RUNNING check (either `if status == RUNNING:
+    step` or `if status != RUNNING: skip/break`). The 27B hailstorm's
+    play loop had NO such guard — it still fails.
+    """
+    import re
+
+    for fname in ("controller.py", "__main__.py"):
+        p = sandbox / "game" / fname
+        if not p.exists():
+            continue
+        lines = p.read_text(errors="replace").splitlines()
+        for i, ln in enumerate(lines):
+            # a line that advances physics
+            if not re.search(r"\.step\(|physics_step\(|advance\(", ln):
+                continue
+            win = "\n".join(lines[max(0, i - 6):i + 3])
+            if not re.search(r"RUNNING", win):
+                continue
+            # guarded: physics only when RUNNING, or skipped/break when not
+            if re.search(r"if .*status.*(==|!=).*RUNNING|"
+                         r"if .*RUNNING.*(==|!=).*status", win) \
+               and re.search(r"if .*status\s*==\s*(STATUS_)?RUNNING|"
+                             r"status\s*!=\s*(STATUS_)?RUNNING|"
+                             r"(STATUS_)?RUNNING\s*!=\s*status", win):
                 return True
     return False
 
@@ -705,7 +750,11 @@ def _human_play_smoke(sandbox: Path) -> dict:
             del sys.modules[_k]
         sys.path.insert(0, str(sandbox))
         from game.controller import GameController  # noqa: PLC0415
-        sys.path.pop(0)
+        # NOTE: sys.path stays inserted for the WHOLE probe — the
+        # autopilot calls _ctl.reset(), and a controller may lazily
+        # `from game.core import X` inside reset()/step() (35B v4).
+        # Popping here would fail that lazy import and grade a perfect
+        # game as "unverifiable". Cleanup happens after the loop below.
         for _seed in (0, 42):
             try:
                 _ctl = GameController()
@@ -762,6 +811,15 @@ def _human_play_smoke(sandbox: Path) -> dict:
                         break
                 if lc_advances is not None:
                     break
+                if not _settled and _play_loop_settles_in(sandbox):
+                    # Direct step() keeps simulating, BUT the play loop
+                    # gates physics on RUNNING — so a human sees a frozen
+                    # LEVEL_COMPLETE and Enter advances. Same class as the
+                    # ds4f tick false positive: the probe drove the wrong
+                    # layer (35B v4: step() has no status guard, play()
+                    # only steps while RUNNING). The 27B hailstorm's play
+                    # loop had NO guard — it still fails below.
+                    _settled = True
                 if not _settled:
                     lc_advances, lc_how = False, None
                     lc_detail = ("world keeps simulating at LEVEL_COMPLETE "
@@ -793,6 +851,10 @@ def _human_play_smoke(sandbox: Path) -> dict:
                 break
             except Exception:  # noqa: BLE001
                 continue
+        sys.path.pop(0)
+        for _k in [k for k in list(sys.modules)
+                   if k == "game" or k.startswith("game.")]:
+            del sys.modules[_k]
     except Exception:  # noqa: BLE001
         lc_advances, lc_how = None, None
         lc_detail = "unverifiable (probe error)"

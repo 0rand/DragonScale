@@ -56,6 +56,47 @@ def test_smoke_good_lc_probe_cached_module():
     assert hp1["ok"] and hp2["ok"]
 
 
+def test_solver_keeps_sandbox_on_path_for_lazy_imports(tmp_path):
+    """Regression: a controller that lazily `from game.core import X`
+    inside reset()/step() must still solve. The old code purged game.*
+    from sys.modules and popped the sandbox off sys.path IMMEDIATELY
+    after import, so the lazy import inside solve_all -> reset() raised
+    ModuleNotFoundError (35B v4: 'solver could not load the game')."""
+    from bench.grader import solve_via_import
+    # Tiny sandbox: a game package whose controller lazily imports core.
+    g = tmp_path / "game"
+    g.mkdir()
+    (g / "__init__.py").write_text("")
+    (g / "core.py").write_text(
+        "BIRD_X = 10\nPIPE_WIDTH = 4\nTICK_RATE = 20\n"
+        "class Level:\n"
+        "    def __init__(self, speed, gravity, flap_velocity, gap, pipe_spacing, target):\n"
+        "        self.speed, self.gravity, self.flap_velocity = speed, gravity, flap_velocity\n"
+        "        self.gap, self.pipe_spacing, self.target = gap, pipe_spacing, target\n"
+        "LEVELS = [Level(0.72, 12.0, -10.0, 12, 30, 5),\n"
+        "          Level(1.05, 18.0, -9.8, 9, 27, 7),\n"
+        "          Level(1.35, 22.0, -10.8, 8, 24, 9),\n"
+        "          Level(1.60, 24.0, -11.0, 7, 22, 11)]\n"
+        "def step_world(w, a):\n    return w\n")
+    (g / "controller.py").write_text(
+        "from game.core import TICK_RATE\n"
+        "class GameController:\n"
+        "    def __init__(self):\n"
+        "        from game.core import BIRD_X  # lazy, called at runtime\n"
+        "        self.bird_x = BIRD_X\n"
+        "    def reset(self, level=0, seed=None):\n"
+        "        from game.core import PIPE_WIDTH  # lazy in reset()\n"
+        "        self.pipe_width = PIPE_WIDTH\n"
+        "    def state(self):\n"
+        "        return {'status': 'RUNNING', 'bird': {'y': 1.0, 'velocity': 0.0},\n"
+        "                'pipes': [], 'score': 0, 'tick': 0, 'height': 24}\n"
+        "    def step(self, action='NONE'):\n"
+        "        return self.state()\n")
+    res = solve_via_import(tmp_path, seed=42)
+    assert "import_error" not in res, res
+    assert "solver_error" not in res, res
+
+
 @smoke
 def test_smoke_stuck_lc_fails_progression():
     """A game that freezes at LEVEL_COMPLETE but cannot advance on Enter
