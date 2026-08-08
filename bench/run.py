@@ -22,12 +22,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+# Runs live OUTSIDE the project tree (default ~/DragoScaleRuns) so a
+# model's git commands inside a sandbox can never walk up and commit
+# into this repo (luna v4: no nested .git -> its commits landed in
+# dragonscale main). Override with $DRAGONSCALE_RUNS.
+RUNS_ROOT = Path(
+    os.environ.get("DRAGONSCALE_RUNS", str(Path.home() / "DragoScaleRuns"))
+).expanduser().resolve()
 
 
 def main():
@@ -51,7 +60,7 @@ def main():
     if not scenario.is_dir():
         sys.exit(f"scenario not found: {scenario}")
 
-    runs = ROOT / "runs" / args.label
+    runs = RUNS_ROOT / args.label
     runs.mkdir(parents=True, exist_ok=True)
     sandbox = Path(args.workdir).expanduser().resolve() if args.workdir \
         else runs / "sandbox"

@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from bench.grader import compute_score
+from bench.run import RUNS_ROOT
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 VENV_PY = ROOT / ".venv" / "bin" / "python"
@@ -33,7 +34,7 @@ def _grade(label, prebuilt):
         [str(VENV_PY), "bench/run.py", "--scenario", "flappy-build",
          "--label", label, "--prebuilt", prebuilt],
         cwd=ROOT, capture_output=True, text=True, timeout=300)
-    return json.loads((ROOT / "runs" / label / "report.json").read_text())
+    return json.loads((RUNS_ROOT / label / "report.json").read_text())
 
 
 @smoke
@@ -121,9 +122,9 @@ def test_report_stamps_model_via_cli():
          "--model", "TESTPROVIDER/Qwen3.6-35B"],
         cwd=ROOT, capture_output=True, text=True, timeout=300)
     assert r.returncode == 0, r.stderr[-500:]
-    rep = json.loads((ROOT / "runs" / label / "report.json").read_text())
+    rep = json.loads((RUNS_ROOT / label / "report.json").read_text())
     assert rep["model"] == "TESTPROVIDER/Qwen3.6-35B"
-    md = (ROOT / "runs" / label / "report.md").read_text()
+    md = (RUNS_ROOT / label / "report.md").read_text()
     assert "TESTPROVIDER/Qwen3.6-35B" in md
     assert "Model under test" in md
 
@@ -137,9 +138,9 @@ def test_report_model_unknown_without_model():
          "--label", label, "--prebuilt", "scripts/smoke_good"],
         cwd=ROOT, capture_output=True, text=True, timeout=300)
     assert r.returncode == 0, r.stderr[-500:]
-    rep = json.loads((ROOT / "runs" / label / "report.json").read_text())
+    rep = json.loads((RUNS_ROOT / label / "report.json").read_text())
     assert rep["model"] is None
-    md = (ROOT / "runs" / label / "report.md").read_text()
+    md = (RUNS_ROOT / label / "report.md").read_text()
     assert "unknown" in md
     assert rep["verdict"]["result"] == "PASS"  # model stamping never affects verdict
 
@@ -148,7 +149,7 @@ def test_report_model_unknown_without_model():
 def test_prebuilt_grade_recovers_model_from_dispatch_json(tmp_path):
     """Re-grading a dispatched run's label recovers the model from dispatch.json."""
     label = "score-model-dispatch"
-    run_dir = ROOT / "runs" / label
+    run_dir = RUNS_ROOT / label
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "dispatch.json").write_text(json.dumps(
         {"runner": "opencode", "provider": "MYPROVIDER",

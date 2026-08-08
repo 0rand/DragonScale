@@ -13,6 +13,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 VENV_PY = ROOT / ".venv" / "bin" / "python"
+sys.path.insert(0, str(ROOT))
+from bench.run import RUNS_ROOT  # noqa: E402
 
 # The smoke fixtures are reference implementations, withheld from the
 # public repo (benchmark integrity). On a fresh clone they are absent —
@@ -156,8 +158,8 @@ def test_smoke_broken_seeded_fails_stably():
     """
     a = _grade("pytest-broken-seed-a", "scripts/smoke_broken_seeded")
     b = _grade("pytest-broken-seed-b", "scripts/smoke_broken_seeded")
-    sa = json.loads((ROOT / "runs" / "pytest-broken-seed-a" / "report.json").read_text())
-    sb = json.loads((ROOT / "runs" / "pytest-broken-seed-b" / "report.json").read_text())
+    sa = json.loads((RUNS_ROOT / "pytest-broken-seed-a" / "report.json").read_text())
+    sb = json.loads((RUNS_ROOT / "pytest-broken-seed-b" / "report.json").read_text())
     assert a["result"] == "FAIL"
     assert b["result"] == "FAIL"
     assert sa["score"]["total"] == sb["score"]["total"], (sa["score"], sb["score"])

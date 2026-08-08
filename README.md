@@ -32,8 +32,12 @@ bench/
   trace.py           # tool-call log parser (diagnostic)
   tests/             # canonical pytest suite
 scripts/             # smoke fixtures (known-good / broken) — withheld, private
-runs/<label>/        # sandbox, dispatch logs, report.md/json (gitignored)
 ```
+
+Runs live **outside the repo** at `~/DragoScaleRuns/<label>/` (override
+with `$DRAGONSCALE_RUNS`) — never inside the project tree, so a model's
+git commands inside a sandbox can never walk up and commit into this
+repo.
 
 The hidden suite is **public** — the exact values it asserts live in the
 public `reference.md` the model is given as its spec, so publishing the

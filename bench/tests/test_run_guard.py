@@ -15,6 +15,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 VENV_PY = ROOT / ".venv" / "bin" / "python"
+sys.path.insert(0, str(ROOT))
+from bench.run import RUNS_ROOT  # noqa: E402
 
 # Smoke fixtures are reference implementations, withheld from the public
 # repo — tests that grade them skip when absent (grading a model needs
@@ -36,16 +38,16 @@ def _run(label, prebuilt, extra=None):
 def test_guard_refuses_self_prebuilt():
     """--prebuilt <run>/sandbox --label <run> must refuse and not delete."""
     label = "run-oc-35b-001"
-    sandbox = ROOT / "runs" / label / "sandbox"
+    sandbox = RUNS_ROOT / label / "sandbox"
     if not sandbox.is_dir():
         # no evidence dir to protect; the guard's refusal path is untestable
         # without one — build a minimal fake run dir instead
-        (ROOT / "runs" / label).mkdir(parents=True, exist_ok=True)
+        (RUNS_ROOT / label).mkdir(parents=True, exist_ok=True)
         (sandbox).mkdir(exist_ok=True)
         (sandbox / "marker.txt").write_text("x")
     before = sorted(str(p.relative_to(sandbox)) for p in sandbox.rglob("*") if p.is_file())
 
-    r = _run(label, f"runs/{label}/sandbox")
+    r = _run(label, str(RUNS_ROOT / label / "sandbox"))
     assert r.returncode != 0
     assert "refusing" in (r.stdout + r.stderr)
 
@@ -72,4 +74,4 @@ def test_workdir_creates_sandbox_at_requested_path(tmp_path):
     assert target.is_dir()
     assert (target / "reference.md").exists()
     # report still lands under runs/<label>/
-    assert (ROOT / "runs" / "verify-workdir" / "report.json").exists()
+    assert (RUNS_ROOT / "verify-workdir" / "report.json").exists()
