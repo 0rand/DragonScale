@@ -108,6 +108,10 @@ Work in a loop of SMALL steps — never one giant response. Your output
 per turn is limited; a single huge response will be cut off mid-file and
 the work will be lost.
 
+0. **Write `plan.md` FIRST.** Before anything else, create `plan.md`
+   with your file-writing tool: the file list, the order you will build
+   them, and a checklist. Mark step 1 as in progress. This file is your
+   memory — it survives output truncation.
 1. **Plan briefly, then WRITE.** Read `reference.md` and the contract,
    then immediately create `game/core.py` with your file-writing tool.
    Do NOT spend turns analyzing the spec in chat — extract the constants
@@ -115,14 +119,16 @@ the work will be lost.
 2. **Implement one file per step.** Use your file-writing tool for each
    file. Do NOT paste large amounts of code into chat — write files with
    tools, then move on.
-3. **Verify each step.** Run `tests/test_contract.py` and your own tests
+3. **Update `plan.md` after every step.** Tick off what is done, mark
+   what is next. If your output is cut off, the next turn reads
+   `plan.md` to know exactly where to continue.
+4. **Verify each step.** Run `tests/test_contract.py` and your own tests
    as you go. Fix failures before moving on.
-4. **Track progress.** Keep a short checklist of done / next. Update it
-   after every step.
 
 If a response starts getting long, stop and let the next turn continue —
 the harness will prompt you to keep going. If your output is cut off,
-your work is NOT lost: continue from where you stopped, do not restart.
+your work is NOT lost: read `plan.md`, continue from where you stopped,
+do not restart.
 
 ## Completion
 
