@@ -108,8 +108,10 @@ Work in a loop of SMALL steps — never one giant response. Your output
 per turn is limited; a single huge response will be cut off mid-file and
 the work will be lost.
 
-1. **Plan first.** Read `reference.md` and the contract. Write a short
-   plan: which files, in what order, what to verify. Keep it brief.
+1. **Plan briefly, then WRITE.** Read `reference.md` and the contract,
+   then immediately create `game/core.py` with your file-writing tool.
+   Do NOT spend turns analyzing the spec in chat — extract the constants
+   as you write. A short plan is fine; a long essay is not.
 2. **Implement one file per step.** Use your file-writing tool for each
    file. Do NOT paste large amounts of code into chat — write files with
    tools, then move on.
@@ -119,7 +121,8 @@ the work will be lost.
    after every step.
 
 If a response starts getting long, stop and let the next turn continue —
-the harness will prompt you to keep going.
+the harness will prompt you to keep going. If your output is cut off,
+your work is NOT lost: continue from where you stopped, do not restart.
 
 ## Completion
 

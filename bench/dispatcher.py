@@ -137,10 +137,16 @@ def _has_job_complete(stdout: str) -> bool:
 
 
 NUDGE_MESSAGE = (
-    "You have not said JOB COMPLETE yet. Continue working from where you "
-    "left off. Do NOT repeat work already done. Keep implementing, "
-    "testing, and committing until the task is genuinely complete, then "
-    "end your final message with the exact line: JOB COMPLETE"
+    "Your previous response was cut off by the output token limit — that "
+    "is normal and NOT a failure. Your analysis and planning are preserved "
+    "in this conversation; nothing was lost. Do NOT restart from scratch "
+    "and do NOT re-read files you have already read. Continue exactly where "
+    "you left off: WRITE the next file now using your file-writing tool "
+    "(game/core.py, then controller.py, render.py, __main__.py, tests, "
+    "pyproject.toml, README.md), run the tests, and commit. Keep each "
+    "response SHORT — write files with tools, not long prose in chat. When "
+    "the task is genuinely complete, end your final message with the exact "
+    "line: JOB COMPLETE"
 )
 
 
