@@ -102,6 +102,35 @@ Where the document is self-contradictory, the **Current Tuning** section
   access, no external data files beyond what you create.
 - Do not modify `reference.md` or `tests/test_contract.py`.
 
+## Working method (mandatory)
+
+Work in a loop of SMALL steps — never one giant response. Your output
+per turn is limited; a single huge response will be cut off mid-file and
+the work will be lost.
+
+1. **Plan first.** Read `reference.md` and the contract. Write a short
+   plan: which files, in what order, what to verify. Keep it brief.
+2. **Implement one file per step.** Use your file-writing tool for each
+   file. Do NOT paste large amounts of code into chat — write files with
+   tools, then move on.
+3. **Verify each step.** Run `tests/test_contract.py` and your own tests
+   as you go. Fix failures before moving on.
+4. **Track progress.** Keep a short checklist of done / next. Update it
+   after every step.
+
+If a response starts getting long, stop and let the next turn continue —
+the harness will prompt you to keep going.
+
+## Completion
+
+When ALL deliverables are complete and verified (tests green, game
+playable, git committed), end your final message with the exact line:
+
+    JOB COMPLETE
+
+Do NOT say `JOB COMPLETE` before the work is actually done. If you are
+prompted to continue, keep working until you can honestly say it.
+
 ## Evaluation
 
 Your submission is graded on:

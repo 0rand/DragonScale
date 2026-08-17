@@ -88,18 +88,70 @@ def _run(cmd, cwd, timeout):
         return {"exit": -2, "stdout": "", "stderr": str(e)}
 
 
+def _extract_session_id(stdout: str) -> str | None:
+    """Pull the opencode session ID from NDJSON run output."""
+    import json as _json
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = _json.loads(line)
+        except _json.JSONDecodeError:
+            continue
+        sid = ev.get("sessionID")
+        if sid:
+            return sid
+    return None
+
+
+def _has_job_complete(stdout: str) -> bool:
+    """True if the model's output contains the JOB COMPLETE codeword."""
+    return "JOB COMPLETE" in stdout
+
+
+NUDGE_MESSAGE = (
+    "You have not said JOB COMPLETE yet. Continue working from where you "
+    "left off. Do NOT repeat work already done. Keep implementing, "
+    "testing, and committing until the task is genuinely complete, then "
+    "end your final message with the exact line: JOB COMPLETE"
+)
+
+
 def dispatch_opencode(sandbox: Path, prompt_path: Path, model: str,
-                      timeout: int = 3600) -> dict:
-    """opencode one-shot run. model is 'Provider/Model' (e.g. MYPROVIDER/my-model).
+                      timeout: int = 3600, max_nudges: int = 5) -> dict:
+    """opencode run with a nudge loop. model is 'Provider/Model'.
 
     Fresh session per invocation; --dir roots it in the sandbox; build agent
     has full read/edit/bash permissions in the user config.
+
+    Some models (Qwen 3.8 27B) try to emit the whole implementation in ONE
+    response and hit the output-token cap mid-file (reason: length) — the
+    session ends with nothing written. The nudge loop re-opens the SAME
+    session (`-s <session_id>`) with a continuation prompt until the model
+    says JOB COMPLETE or max_nudges is exhausted. The codeword is defined
+    in prompt.md; the grader never trusts it — it only stops the nudging.
     """
     msg = _prepare_task(sandbox, prompt_path)
     cmd = [_find_binary("opencode", "OPENCODE_BIN"),
            "run", "--format", "json", "-m", model,
            "--agent", "build", "--dir", str(sandbox), msg]
-    return _run(cmd, sandbox, timeout)
+    result = _run(cmd, sandbox, timeout)
+    session_id = _extract_session_id(result["stdout"])
+    nudges = 0
+    while (session_id and not _has_job_complete(result["stdout"])
+           and nudges < max_nudges):
+        nudge_cmd = [_find_binary("opencode", "OPENCODE_BIN"),
+                     "run", "--format", "json", "-m", model,
+                     "--agent", "build", "--dir", str(sandbox),
+                     "-s", session_id, NUDGE_MESSAGE]
+        nudge = _run(nudge_cmd, sandbox, timeout)
+        result["stdout"] += nudge["stdout"]
+        result["stderr"] += nudge["stderr"]
+        result["exit"] = nudge["exit"] if nudge["exit"] != 0 else result["exit"]
+        nudges += 1
+    result["nudges"] = nudges
+    return result
 
 
 def dispatch_jcode(sandbox: Path, prompt_path: Path, provider: str,

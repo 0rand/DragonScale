@@ -54,6 +54,10 @@ def main():
                                       "(default: runs/<label>/sandbox)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--timeout", type=int, default=3600)
+    ap.add_argument("--max-nudges", type=int, default=5,
+                    help="opencode: re-open the session with a continuation "
+                         "prompt until the model says JOB COMPLETE "
+                         "(0 = one-shot, no nudging)")
     args = ap.parse_args()
 
     scenario = ROOT / "scenarios" / args.scenario
@@ -99,11 +103,13 @@ def main():
             if "/" not in model and args.provider:
                 model = f"{args.provider}/{model}"
             res = dispatch_opencode(sandbox, scenario / "prompt.md", model,
-                                    timeout=args.timeout)
+                                    timeout=args.timeout,
+                                    max_nudges=args.max_nudges)
             model_label = model
         (runs / "dispatch.json").write_text(json.dumps(
             {"runner": args.runner, "provider": args.provider, "model": model_label,
              "workdir": str(sandbox), "exit": res["exit"],
+             "nudges": res.get("nudges", 0),
              "stdout_bytes": len(res["stdout"]), "stderr_bytes": len(res["stderr"])},
             indent=2))
         (runs / "dispatch.stdout.log").write_text(res["stdout"])
