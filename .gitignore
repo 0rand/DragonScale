@@ -1,5 +1,7 @@
 runs/
 .venv/
+# tool-eval-bench writes its run DB into the CWD it's launched from
+data/
 __pycache__/
 *.pyc
 .DS_Store
