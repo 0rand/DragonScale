@@ -40,9 +40,21 @@ def test_extract_session_id_none_when_empty():
 
 
 def test_has_job_complete():
-    assert dispatcher._has_job_complete("... JOB COMPLETE ...")
-    assert not dispatcher._has_job_complete("... still working ...")
+    # strict: JOB COMPLETE must be the LAST non-empty line of the final
+    # assistant text part (NDJSON shape)
+    ok = ('{"type":"text","sessionID":"s1",'
+          '"part":{"text":"all done\\nJOB COMPLETE"}}\n')
+    assert dispatcher._has_job_complete(ok)
+    # substring in the middle / planning mention does NOT count
+    mid = ('{"type":"text","sessionID":"s1",'
+           '"part":{"text":"I will say JOB COMPLETE when done"}}\n')
+    assert not dispatcher._has_job_complete(mid)
+    # prompt echo (tool output, not a text part) does NOT count
+    echo = ('{"type":"tool","sessionID":"s1",'
+            '"part":{"state":{"output":"... JOB COMPLETE ..."}}}\n')
+    assert not dispatcher._has_job_complete(echo)
     assert not dispatcher._has_job_complete("")
+    assert not dispatcher._has_job_complete("... JOB COMPLETE ...")
 
 
 def test_nudge_loop_continues_session(monkeypatch, tmp_path):
@@ -59,7 +71,7 @@ def test_nudge_loop_continues_session(monkeypatch, tmp_path):
                     "stderr": ""}
         return {"exit": 0,
                 "stdout": '{"type":"text","sessionID":"ses_nudge1",'
-                          '"part":{"text":"done now JOB COMPLETE"}}\n',
+                          '"part":{"text":"done now\\nJOB COMPLETE"}}\n',
                 "stderr": ""}
 
     monkeypatch.setattr(dispatcher, "_run", fake_run)

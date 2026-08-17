@@ -128,8 +128,10 @@ playable, git committed), end your final message with the exact line:
 
     JOB COMPLETE
 
-Do NOT say `JOB COMPLETE` before the work is actually done. If you are
-prompted to continue, keep working until you can honestly say it.
+`JOB COMPLETE` must be the LAST line of your final message — nothing
+after it. Do NOT say `JOB COMPLETE` before the work is actually done,
+and do not mention it in plans or progress notes. If you are prompted to
+continue, keep working until you can honestly say it.
 
 ## Evaluation
 

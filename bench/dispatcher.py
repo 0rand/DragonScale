@@ -106,8 +106,34 @@ def _extract_session_id(stdout: str) -> str | None:
 
 
 def _has_job_complete(stdout: str) -> bool:
-    """True if the model's output contains the JOB COMPLETE codeword."""
-    return "JOB COMPLETE" in stdout
+    """True only if the model's FINAL assistant message ends with JOB COMPLETE.
+
+    A naive substring match false-positives: the prompt echo (TASK.md's
+    Completion section, read via the read tool) and planning text ("I will
+    say JOB COMPLETE when done") both contain the codeword. Only a
+    standalone `JOB COMPLETE` as the LAST non-empty line of the last
+    assistant text part counts (Primo's rule: "tell it to say JOB COMPLETE
+    as the last line of its output").
+    """
+    import json as _json
+
+    last_text = ""
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = _json.loads(line)
+        except _json.JSONDecodeError:
+            continue
+        if ev.get("type") == "text":
+            part = ev.get("part", {})
+            if isinstance(part, dict) and part.get("text"):
+                last_text = part["text"]
+    if not last_text:
+        return False
+    non_empty = [l.strip() for l in last_text.splitlines() if l.strip()]
+    return bool(non_empty) and non_empty[-1] == "JOB COMPLETE"
 
 
 NUDGE_MESSAGE = (
