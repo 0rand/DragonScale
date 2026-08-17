@@ -330,7 +330,7 @@ def _play_loop_advance_in(sandbox: Path) -> bool:
     """
     import re
 
-    for fname in ("controller.py", "__main__.py"):
+    for fname in ("controller.py", "__main__.py", "keyboard.py"):
         p = sandbox / "game" / fname
         if not p.exists():
             continue
@@ -419,15 +419,17 @@ def _lc_progress_check(ctl, sandbox: Path) -> str:
         except Exception:  # noqa: BLE001
             return False
 
-    # 1. controller.advance() method (smoke_good / reference convention)
-    try:
-        _adv = getattr(ctl, "advance", None)
-        if callable(_adv):
-            _adv()
-            if _progressed():
-                return "advanced"
-    except Exception:  # noqa: BLE001
-        pass
+    # 1. controller advance method (smoke_good / reference convention).
+    #    Try the common names: advance(), next_level(), advance_level().
+    for _adv_name in ("advance", "next_level", "advance_level"):
+        try:
+            _adv = getattr(ctl, _adv_name, None)
+            if callable(_adv):
+                _adv()
+                if _progressed():
+                    return "advanced"
+        except Exception:  # noqa: BLE001
+            pass
 
     # 2. _map_key(stdscr, key) method (curses convention — DS GA)
     try:
