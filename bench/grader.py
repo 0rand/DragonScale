@@ -324,9 +324,12 @@ def _play_loop_advance_in(sandbox: Path) -> bool:
 
     This rung ONLY fires after the behavioral rungs fail, and only when the
     binding is DIRECT: an advance call (reset/advance_level/next_level/WON)
-    within 8 lines of BOTH an Enter key and a LEVEL_COMPLETE/WON check.
-    A dead flag (35B v3: _next_level_requested = True, consumed nowhere)
-    does NOT match — the flag is not an advance call.
+    within 8 lines of a LEVEL_COMPLETE/WON check, AND an Enter key binding
+    somewhere in the file (the key map may live in a helper method — e.g.
+    _drain_keys maps b"\r"/b"\n" -> "NEXT", the play loop advances on
+    "NEXT" at LEVEL_COMPLETE; qwen-3.8-27b-mlx-mtp-mxfp8-1). A dead flag
+    (35B v3: _next_level_requested = True, consumed nowhere) does NOT
+    match — the flag is not an advance call.
     """
     import re
 
@@ -338,17 +341,21 @@ def _play_loop_advance_in(sandbox: Path) -> bool:
         # An advance-keys set that includes Enter/newline (ds4f pattern).
         adv_keys = re.search(
             r"_ADVANCE_KEYS\s*=\s*frozenset\(\s*\{[^}]*\\[rn]", src)
+        # Enter key binding ANYWHERE in the file (key map may be in a
+        # helper method, not adjacent to the advance call).
+        key_anywhere = bool(re.search(
+            r'["\']\\[rn]["\']|KEY_ENTER|343|\b10,\s*13\b', src)) \
+            or bool(adv_keys)
+        if not key_anywhere:
+            continue
         lines = src.splitlines()
         for i, ln in enumerate(lines):
             if not re.search(r"reset\(|advance_level\(|next_level|"
                              r"status\s*=\s*[\"']WON", ln):
                 continue
             win = "\n".join(lines[max(0, i - 8):i + 9])
-            has_key = bool(re.search(
-                r'["\']\\[rn]["\']|KEY_ENTER|343|\b10,\s*13\b', win)) \
-                or (adv_keys and "_ADVANCE_KEYS" in win)
             has_lc = bool(re.search(r"LEVEL_COMPLETE|\bWON\b", win))
-            if has_key and has_lc:
+            if has_lc:
                 return True
     return False
 
@@ -592,7 +599,14 @@ def _human_play_smoke(sandbox: Path) -> dict:
                 pass
         if proc.poll() is not None:
             break
-        time.sleep(0.05)
+        # NO sleep here: the select(0.1s) above already paces the drain.
+        # A sleep after it widens the drain gap to ~0.15s, which stalls
+        # games that write near-full frames (~1950B vs the 2048B pty
+        # buffer): the child's write blocks on the full buffer, it falls
+        # behind its tick deadline, and never reaches the select branch
+        # that reads 'q' — the quit key sits in the input buffer forever
+        # and the smoke SIGKILLs it (exit -9). Verified: qwen-3.8-27b-
+        # mlx-mtp-mxfp8-1 exits 0 without the sleep, -9 with it.
     if proc.poll() is None:
         proc.kill()
         proc.wait()
