@@ -45,15 +45,45 @@ def _sha(path: Path) -> str:
 def _pytest_result(sandbox: Path, test_path: Path, timeout=600):
     env = dict(os.environ)
     env["PYTHONPATH"] = str(sandbox)
-    r = _run([VENV_PY, "-m", "pytest", str(test_path), "-q", "--no-header",
-              "-p", "no:cacheprovider", "--tb=line"],
-             cwd=test_path.parent, env=env, timeout=timeout)
-    out = r["output"]
-    passed = int(m.group(1)) if (m := re.search(r"(\d+) passed", out)) else 0
-    failed = int(m.group(1)) if (m := re.search(r"(\d+) failed", out)) else 0
-    errors = int(m.group(1)) if (m := re.search(r"(\d+) error", out)) else 0
-    return {"passed": passed, "failed": failed, "errors": errors,
-            "exit": r["exit"], "tail": out[-4000:]}
+    # Robust counting. pytest 9.1.1 with `-q --no-header` on a piped/non-tty
+    # stdout does NOT emit the "N passed in Xs" summary line (observed on the
+    # model's own suite: last line is just "...[100%]"), so the old regex
+    # parser returned 0p/0f/0e and graded every green suite as
+    # own_tests=0 / mutation=N/A. --junitxml (machine-readable, version
+    # independent) is the source of truth; the regex is only a fallback for
+    # pytest builds that can't emit XML.
+    import tempfile
+    import xml.etree.ElementTree as ET
+    jxml = Path(tempfile.mkstemp(prefix="ds_pytest_", suffix=".xml")[1])
+    try:
+        r = _run([VENV_PY, "-m", "pytest", str(test_path), "-q", "--no-header",
+                  "-p", "no:cacheprovider", "--tb=line", "--junitxml", str(jxml)],
+                 cwd=test_path.parent, env=env, timeout=timeout)
+        out = r["output"]
+        passed = failed = errors = 0
+        use_regex = True
+        if jxml.exists() and jxml.stat().st_size > 0:
+            try:
+                root = ET.parse(jxml).getroot()
+                tcs = root.findall(".//testcase")
+                if tcs:
+                    failed = sum(1 for tc in tcs if tc.find("failure") is not None)
+                    errors = sum(1 for tc in tcs if tc.find("error") is not None)
+                    passed = len(tcs) - failed - errors
+                    use_regex = False
+            except ET.ParseError:
+                pass
+        if use_regex and out.strip():
+            passed = int(m.group(1)) if (m := re.search(r"(\d+) passed", out)) else 0
+            failed = int(m.group(1)) if (m := re.search(r"(\d+) failed", out)) else 0
+            errors = int(m.group(1)) if (m := re.search(r"(\d+) error", out)) else 0
+        return {"passed": passed, "failed": failed, "errors": errors,
+                "exit": r["exit"], "tail": out[-4000:]}
+    finally:
+        try:
+            jxml.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def git_info(sandbox: Path):
